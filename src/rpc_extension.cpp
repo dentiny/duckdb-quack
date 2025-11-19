@@ -82,6 +82,9 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 
 	client.Send(std::move(execute_message));
 	auto execute_response = client.WaitForMessage();
+	if (execute_response->type != MessageType::EXECUTE_RESULT) {
+		throw InvalidInputException("Expected bind result message");
+	}
 
 	output.Reference(*execute_response->data);
 	output.SetCardinality(execute_response->data->size());

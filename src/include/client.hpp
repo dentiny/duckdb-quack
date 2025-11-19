@@ -20,17 +20,12 @@ struct RpcClient {
 	~RpcClient();
 
 	void OnOpen(websocketpp::connection_hdl hdl);
-
 	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
-
-	// boo
 	void OnFail(websocketpp::connection_hdl hdl);
-
 	unique_ptr<ProtocolMessage> WaitForMessage();
+
 	void SendInternal(websocketpp::connection_hdl hdl);
 	void Schedule(unique_ptr<ProtocolMessage> message_p);
-
-	// TODO too much overlap with SendInternal
 	void Send(unique_ptr<ProtocolMessage> message_p);
 
 	std::thread conn_thread;

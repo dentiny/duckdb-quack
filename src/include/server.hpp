@@ -5,6 +5,7 @@
 #include "websocketpp/config/asio.hpp"
 #include "websocketpp/config/asio_client.hpp"
 #include "websocketpp/server.hpp"
+#include "duckdb/main/connection.hpp"
 
 namespace duckdb {
 
@@ -24,6 +25,10 @@ struct RpcServer {
 	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
 
 	ClientContext &context;
+
+	// FIXME have one duckdb per ws connection!
+	Connection internal_connection;
+
 	server s;
 };
 } // namespace duckdb

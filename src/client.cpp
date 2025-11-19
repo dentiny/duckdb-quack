@@ -29,25 +29,23 @@ static void ConnectionThread(void *rpc_client_p) {
 	if (ec) {
 		throw InternalException(ec.message());
 	}
+	// actually listen and run event loop
 	rpc_client->c.connect(rpc_client->con);
 	rpc_client->c.run();
 }
 
 RpcClient::RpcClient(string &uri_p) : uri(uri_p) {
-
+	// some ugly setup
 	c.set_access_channels(websocketpp::log::alevel::none);
 	c.set_error_channels(websocketpp::log::alevel::none);
-	// c.clear_access_channels(websocketpp::log::alevel::frame_payload);
-
-	// Initialize ASIO
 	c.init_asio();
 	c.set_tls_init_handler(bind(&on_tls_init_client, "localhost", ::_1));
 	c.set_user_agent("DuckDB");
 	c.set_message_handler(bind(&RpcClient::OnMessage, this, ::_1, ::_2));
 	c.set_fail_handler(bind(&RpcClient::OnFail, this, ::_1));
-
 	c.set_open_handler(bind(&RpcClient::OnOpen, this, ::_1));
 
+	// launch ze background thread to listen
 	conn_thread = std::thread([=]() {
 		ConnectionThread(this);
 		return 1;
@@ -66,9 +64,7 @@ void RpcClient::OnOpen(websocketpp::connection_hdl hdl) {
 }
 
 void RpcClient::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
-	MemoryStream read_stream(data_ptr_cast((void *)msg->get_payload().data()), msg->get_payload().size());
-	BinaryDeserializer deserializer(read_stream);
-	auto received_message = ProtocolMessage::Deserialize(deserializer);
+	auto received_message = ProtocolMessage::FromPayload(msg->get_payload());
 	// printf("REC %d\n", received_message->type);
 	std::unique_lock<std::mutex> lock(messages_mutex);
 	messages.push_front(std::move(received_message));
@@ -95,12 +91,7 @@ void RpcClient::SendInternal(websocketpp::connection_hdl hdl) {
 	if (!message) {
 		return;
 	}
-	auto write_stream = make_uniq<MemoryStream>(); // TODO pass allocator here
-	BinarySerializer serializer(*write_stream);
-	serializer.Begin();
-	message->Serialize(serializer);
-	serializer.End();
-
+	auto write_stream = message->ToMemoryStream();
 	try {
 		c.send(hdl, write_stream->GetData(), write_stream->GetPosition(), websocketpp::frame::opcode::binary);
 	} catch (websocketpp::exception const &e) {
@@ -118,12 +109,7 @@ void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 	if (!message_p) {
 		return;
 	}
-	auto write_stream = make_uniq<MemoryStream>(); // TODO pass allocator here
-	BinarySerializer serializer(*write_stream);
-	serializer.Begin();
-	message_p->Serialize(serializer);
-	serializer.End();
-
+	auto write_stream = message_p->ToMemoryStream();
 	try {
 		c.send(con, write_stream->GetData(), write_stream->GetPosition(), websocketpp::frame::opcode::binary);
 	} catch (websocketpp::exception const &e) {

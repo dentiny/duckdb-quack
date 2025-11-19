@@ -68,7 +68,7 @@ static context_ptr OnTlsInit(tls_mode mode, websocketpp::connection_hdl hdl) {
 	return ctx;
 }
 
-RpcServer::RpcServer(ClientContext &context_p) : context(context_p) {
+RpcServer::RpcServer(ClientContext &context_p) : context(context_p), internal_connection(*context.db) {
 	s.set_access_channels(websocketpp::log::alevel::none);
 	s.set_tls_init_handler(bind(&OnTlsInit, MOZILLA_INTERMEDIATE, ::_1));
 	s.set_message_handler(bind(&RpcServer::OnMessage, this, ::_1, ::_2));
@@ -84,12 +84,8 @@ void RpcServer::Listen(int port) {
 
 // main switcheroo happens here
 void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
-	MemoryStream read_stream(data_ptr_cast((void *)msg->get_payload().data()),
-	                         static_cast<idx_t>(msg->get_payload().size()));
-	BinaryDeserializer deserializer(read_stream);
-	auto received_message = ProtocolMessage::Deserialize(deserializer);
 
-	//		printf("message type %lld\n", (uint8_t)received_message->type);
+	auto received_message = ProtocolMessage::FromPayload(msg->get_payload());
 
 	switch (received_message->type) {
 	case MessageType::BIND: {
@@ -99,21 +95,16 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 		ProtocolMessage response_message;
 		response_message.type = MessageType::BIND_RESULT;
 
-		auto internal_connection = Connection(*context.db);
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
 		auto prepare_result = internal_connection.Prepare(received_message->query);
 
 		response_message.types = prepare_result->GetTypes();
 		response_message.names = prepare_result->GetNames();
 
-		MemoryStream write_stream; // TODO pass allocator here
-		BinarySerializer serializer(write_stream);
-		serializer.Begin();
-		response_message.Serialize(serializer);
-		serializer.End();
+		auto write_message = response_message.ToMemoryStream();
 
 		try {
-			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+			s.send(hdl, write_message->GetData(), write_message->GetPosition(), websocketpp::frame::opcode::binary);
 		} catch (websocketpp::exception const &e) {
 			// TODO we should not fail here but log something
 			std::cout << "bind reply failed because: "
@@ -129,21 +120,14 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 		response_message.type = MessageType::EXECUTE_RESULT;
 
 		// TODO we need to cache this connection in the ws connection somehow
-		auto internal_connection = Connection(*context.db);
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
 		auto execute_result = internal_connection.Query(received_message->query);
 
 		response_message.data = execute_result->Fetch();
-
-		// TODO many
-		MemoryStream write_stream; // TODO pass allocator here
-		BinarySerializer serializer(write_stream);
-		serializer.Begin();
-		response_message.Serialize(serializer);
-		serializer.End();
+		auto write_message = response_message.ToMemoryStream();
 
 		try {
-			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+			s.send(hdl, write_message->GetData(), write_message->GetPosition(), websocketpp::frame::opcode::binary);
 		} catch (websocketpp::exception const &e) {
 			// TODO we should not fail here but log something
 			std::cout << "bind reply failed because: "

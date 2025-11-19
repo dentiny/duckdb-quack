@@ -9,8 +9,11 @@ namespace duckdb {
 enum class MessageType : uint8_t { INVALID = 0, BIND = 1, BIND_RESULT = 2, EXECUTE = 3, EXECUTE_RESULT = 4, ERROR = 5 };
 
 struct ProtocolMessage {
-	void Serialize(Serializer &serializer);
 
+	unique_ptr<MemoryStream> ToMemoryStream();
+	static unique_ptr<ProtocolMessage> FromPayload(std::string const &payload);
+
+	void Serialize(Serializer &serializer);
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
 	MessageType type;
