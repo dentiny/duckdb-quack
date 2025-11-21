@@ -2,6 +2,7 @@
 
 #define ASIO_STANDALONE // no boost!
 
+#include "duckdb/common/serializer/memory_stream.hpp"
 #include "websocketpp/config/asio.hpp"
 #include "websocketpp/config/asio_client.hpp"
 #include "websocketpp/server.hpp"
@@ -28,10 +29,10 @@ struct RpcServer {
 
 	// FIXME have one duckdb per ws connection!
 	Connection internal_connection;
-	unique_ptr<PendingQueryResult> pending_result;
-
 	unique_ptr<QueryResult> query_result;
 	std::thread listen_thread;
 	server s;
+	//	FIXME this should probably also exist per-connection!
+	MemoryStream write_stream;
 };
 } // namespace duckdb

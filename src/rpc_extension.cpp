@@ -72,7 +72,8 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 
 	auto bind_response = client->WaitForMessage();
 	if (bind_response->type != MessageType::BIND_RESULT) {
-		throw InvalidInputException("Expected bind result message");
+		throw InvalidInputException("Expected bind result message, got error instead: %s",
+		                            bind_response->error.c_str());
 	}
 	return_types = bind_response->types;
 	names = bind_response->names;

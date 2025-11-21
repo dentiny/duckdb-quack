@@ -108,14 +108,16 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
 		auto prepare_result = internal_connection.Prepare(received_message->query);
-
-		response_message.types = prepare_result->GetTypes();
-		response_message.names = prepare_result->GetNames();
-
-		auto write_message = response_message.ToMemoryStream();
-
+		if (prepare_result->HasError()) {
+			response_message.type = MessageType::ERROR;
+			response_message.error = prepare_result->GetError();
+		} else {
+			response_message.types = prepare_result->GetTypes();
+			response_message.names = prepare_result->GetNames();
+		}
+		response_message.ToMemoryStream(write_stream);
 		try {
-			s.send(hdl, write_message->GetData(), write_message->GetPosition(), websocketpp::frame::opcode::binary);
+			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 		} catch (websocketpp::exception const &e) {
 			// TODO we should not fail here but log something
 			std::cout << "bind reply failed because: "
@@ -133,7 +135,7 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 
 		// TODO we need to cache this connection in the ws connection somehow
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
-		query_result = internal_connection.Query(received_message->query);
+		query_result = internal_connection.PendingQuery(received_message->query, true)->Execute();
 
 		if (query_result->HasError()) {
 			response_message.type = MessageType::ERROR;
@@ -142,10 +144,10 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 
 		//
 		// response_message.data = execute_result->Fetch();
-		auto write_message = response_message.ToMemoryStream();
+		response_message.ToMemoryStream(write_stream);
 
 		try {
-			s.send(hdl, write_message->GetData(), write_message->GetPosition(), websocketpp::frame::opcode::binary);
+			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 		} catch (websocketpp::exception const &e) {
 			// TODO we should not fail here but log something
 			std::cout << "bind reply failed because: "
@@ -173,10 +175,10 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 			response_message.error = query_result->GetError();
 		}
 
-		auto write_message = response_message.ToMemoryStream();
+		response_message.ToMemoryStream(write_stream);
 
 		try {
-			s.send(hdl, write_message->GetData(), write_message->GetPosition(), websocketpp::frame::opcode::binary);
+			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 		} catch (websocketpp::exception const &e) {
 			// TODO we should not fail here but log something
 			std::cout << "bind reply failed because: "

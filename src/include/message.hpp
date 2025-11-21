@@ -20,7 +20,7 @@ enum class MessageType : uint8_t {
 
 struct ProtocolMessage {
 
-	unique_ptr<MemoryStream> ToMemoryStream();
+	void ToMemoryStream(MemoryStream &write_stream);
 	static unique_ptr<ProtocolMessage> FromPayload(std::string const &payload);
 
 	void Serialize(Serializer &serializer);

@@ -20,3 +20,10 @@ from call_rpc_server('wss://localhost:4242', 'select max(range) from range(10000
 
 statement ok con2
 from call_rpc_server('wss://localhost:4242', 'from test_all_types()')
+
+
+
+statement error con2
+from call_rpc_server('wss://localhost:4242', 'not_a_valid_quer')
+---
+Parser Error

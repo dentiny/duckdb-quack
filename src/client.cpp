@@ -91,9 +91,10 @@ void RpcClient::SendInternal(websocketpp::connection_hdl hdl) {
 	if (!message) {
 		return;
 	}
-	auto write_stream = message->ToMemoryStream();
+	MemoryStream write_stream;
+	message->ToMemoryStream(write_stream);
 	try {
-		c.send(hdl, write_stream->GetData(), write_stream->GetPosition(), websocketpp::frame::opcode::binary);
+		c.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 	} catch (websocketpp::exception const &e) {
 		throw InvalidInputException(e.what());
 	}
@@ -109,9 +110,10 @@ void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 	if (!message_p) {
 		return;
 	}
-	auto write_stream = message_p->ToMemoryStream();
+	MemoryStream write_stream;
+	message_p->ToMemoryStream(write_stream);
 	try {
-		c.send(con, write_stream->GetData(), write_stream->GetPosition(), websocketpp::frame::opcode::binary);
+		c.send(con, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 	} catch (websocketpp::exception const &e) {
 		throw InvalidInputException(e.what());
 	}

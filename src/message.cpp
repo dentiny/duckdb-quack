@@ -28,13 +28,12 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 	return result;
 }
 
-unique_ptr<MemoryStream> ProtocolMessage::ToMemoryStream() {
-	auto write_stream = make_uniq<MemoryStream>(); // TODO pass allocator here
-	BinarySerializer serializer(*write_stream);
+void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) {
+	write_stream.Rewind();
+	BinarySerializer serializer(write_stream);
 	serializer.Begin();
 	Serialize(serializer);
 	serializer.End();
-	return write_stream;
 }
 
 unique_ptr<ProtocolMessage> ProtocolMessage::FromPayload(std::string const &payload) {
