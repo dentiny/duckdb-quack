@@ -30,7 +30,10 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 
 void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) {
 	write_stream.Rewind();
-	BinarySerializer serializer(write_stream);
+	SerializationOptions options;
+	options.serialization_compatibility = SerializationCompatibility::FromIndex(10);
+	BinarySerializer serializer(write_stream, options);
+
 	serializer.Begin();
 	Serialize(serializer);
 	serializer.End();
