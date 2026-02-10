@@ -79,7 +79,6 @@ RpcClient::~RpcClient() {
 	}
 	if (mode == UNIX_SOCKET) {
 		// TODO check for errors etc.
-		printf("close()\n");
 		close(unix_socket);
 	}
 }
@@ -117,15 +116,15 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessage() {
 
 		int data_recv = 0;
 		idx_t msg_len;
-		data_recv = recv(unix_socket, &msg_len, sizeof(idx_t), 0);
+		data_recv = recv(unix_socket, &msg_len, sizeof(idx_t), MSG_WAITALL);
 		if (data_recv != sizeof(idx_t)) {
-			throw std::runtime_error("Receive error 1");
+			throw InternalException("Receive error 1 %llu %lld %s", msg_len, data_recv, strerror(errno));
 		}
 		message_data.resize(msg_len);
 
-		data_recv = recv(unix_socket, (void *)message_data.data(), msg_len, 0);
+		data_recv = recv(unix_socket, (void *)message_data.data(), msg_len, MSG_WAITALL);
 		if (data_recv != msg_len) {
-			throw std::runtime_error("Receive error 2");
+			throw InternalException("Receive error 2 %llu %lld %s", msg_len, data_recv, strerror(errno));
 		}
 		return ProtocolMessage::FromPayload(message_data);
 	}
@@ -133,8 +132,7 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessage() {
 }
 
 void RpcClient::SendInternal(websocketpp::connection_hdl hdl) {
-	printf("send\n");
-
+	D_ASSERT(mode == WEB_SOCKET);
 	if (!message) {
 		return;
 	}
@@ -154,25 +152,12 @@ void RpcClient::Schedule(unique_ptr<ProtocolMessage> message_p) {
 		message = std::move(message_p);
 	}
 	if (mode == UNIX_SOCKET) {
-		printf("send\n");
-
-		// TODO loads of overlap
-		MemoryStream write_stream;
-		message_p->ToMemoryStream(write_stream);
-		idx_t msg_len = write_stream.GetPosition();
-
-		if (send(unix_socket, &msg_len, sizeof(idx_t), 0) != sizeof(idx_t)) {
-			throw std::runtime_error("Send error 1");
-		}
-		if (send(unix_socket, write_stream.GetData(), msg_len, 0) != msg_len) {
-			throw std::runtime_error("Send error 2");
-		}
+		Send(std::move(message_p));
 	}
 }
 
 // TODO too much overlap with SendInternal
 void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
-	printf("send\n");
 	MemoryStream write_stream;
 	message_p->ToMemoryStream(write_stream);
 	if (mode == WEB_SOCKET) {

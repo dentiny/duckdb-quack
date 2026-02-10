@@ -121,14 +121,14 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 		int data_recv = 0;
 		do {
 			idx_t msg_len;
-			data_recv = recv(client_socket_fd, &msg_len, sizeof(idx_t), 0);
+			data_recv = recv(client_socket_fd, &msg_len, sizeof(idx_t), MSG_WAITALL);
 			if (data_recv != sizeof(idx_t)) {
 				printf("Error on recv() call 1\n");
 				break; // TODO we probably want to close the connection in this case
 			}
 			message_data.resize(msg_len);
 
-			data_recv = recv(client_socket_fd, (void *)message_data.data(), msg_len, 0);
+			data_recv = recv(client_socket_fd, (void *)message_data.data(), msg_len, MSG_WAITALL);
 			if (data_recv != msg_len) {
 				printf("Error on recv() call 2\n");
 

@@ -61,7 +61,8 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 	// Set logging to be pretty verbose (everything except message payloads)
 	auto uri = input.inputs[0].GetValue<string>();
 	auto query = input.inputs[1].GetValue<string>();
-	auto client = make_uniq<RpcClient>(uri, Mode::UNIX_SOCKET);
+	auto client =
+	    make_uniq<RpcClient>(uri, StringUtil::StartsWith(StringUtil::Lower(uri), "wss://") ? WEB_SOCKET : UNIX_SOCKET);
 
 	auto bind_message = make_uniq<ProtocolMessage>();
 	bind_message->type = MessageType::BIND;
