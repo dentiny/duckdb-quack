@@ -86,14 +86,12 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 	auto rpc_server = (RpcServer *)rpc_server_p;
 	struct sockaddr_un local;
 
-	auto socket_path = "/tmp/duckdb-rpc-socket";
-
 	auto s = socket(AF_UNIX, SOCK_STREAM, 0);
 	local.sun_family = AF_UNIX;
 
 	memset(&local, 0, sizeof(struct sockaddr_un));
 
-	strcpy(local.sun_path, socket_path);
+	strcpy(local.sun_path, rpc_server->listen_string.c_str());
 	// TODO check errors on this one
 	unlink(local.sun_path);
 	auto len = SUN_LEN(&local);
@@ -104,8 +102,6 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 	if (listen(s, 42 /* TODO: magic constant */)) {
 		throw std::runtime_error("Error on listen call \n");
 	}
-
-	printf("Listening on %s\n", local.sun_path);
 
 	while (true) {
 		int client_socket_fd = 0;
@@ -132,7 +128,11 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 	}
 }
 
-void RpcServer::Listen(const string &listen_string) {
+void RpcServer::Listen(const string &listen_string_p) {
+	if (listen_string_p.size() == 0) {
+		throw InvalidInputException("Empty listen string specified");
+	}
+	listen_string = listen_string_p;
 	if (StringUtil::StartsWith(listen_string, "wss:")) {
 		s.listen(atoi(StringUtil::Replace(listen_string, "wss:", "").c_str()));
 

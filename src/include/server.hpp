@@ -38,5 +38,7 @@ struct RpcServer {
 	server s;
 	//	FIXME this should probably also exist per-connection!
 	MemoryStream write_stream;
+
+	string listen_string;
 };
 } // namespace duckdb

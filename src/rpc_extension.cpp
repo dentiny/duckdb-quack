@@ -58,10 +58,10 @@ private:
 
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	D_ASSERT(args.AllConstant());
-	auto port = args.GetValue(0, 0).GetValue<string>();
+	auto listen_string = args.GetValue(0, 0).GetValue<string>();
 	auto &rpc_state = RcpcStorageExtensionInfo::GetState(*state.GetContext().db);
-	rpc_state.FindOrCreateServer(state.GetContext(), "");
-	result.SetValue(0, StringUtil::Format("Listening on %s", port));
+	rpc_state.FindOrCreateServer(state.GetContext(), listen_string);
+	result.SetValue(0, StringUtil::Format("Listening on %s", listen_string));
 }
 
 RcpcStorageExtensionInfo &RcpcStorageExtensionInfo::GetState(const DatabaseInstance &instance) {
