@@ -89,8 +89,8 @@ RpcClient::~RpcClient() {
 	}
 }
 
-void RpcClient::OnOpen(websocketpp::connection_hdl hdl) {
-	SendInternal(hdl);
+void RpcClient::OnOpen(websocketpp::connection_hdl hdl_p) {
+	connection_open = true;
 }
 
 void RpcClient::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
@@ -100,7 +100,6 @@ void RpcClient::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 	std::unique_lock<std::mutex> lock(messages_mutex);
 	messages.push_front(std::move(received_message));
 	messages_wait.notify_one();
-	SendInternal(hdl);
 }
 
 // boo
@@ -110,12 +109,12 @@ void RpcClient::OnFail(websocketpp::connection_hdl hdl) {
 	throw InvalidInputException("RPC request to %s failed: %s", uri, con->get_ec().message().c_str());
 }
 
-unique_ptr<ProtocolMessage> RpcClient::WaitForMessage(MessageType expected_type) {
+unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expected_type) {
 	unique_ptr<ProtocolMessage> result;
 	if (mode == WEB_SOCKET) {
 		std::unique_lock<std::mutex> lock(messages_mutex);
 		messages_wait.wait(lock, [=] { return !messages.empty(); });
-		auto result(std::move(messages.back()));
+		result = std::move(messages.back());
 		messages.pop_back();
 	}
 	if (mode == UNIX_SOCKET) {
@@ -134,38 +133,15 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessage(MessageType expected_type)
 	return result;
 }
 
-void RpcClient::SendInternal(websocketpp::connection_hdl hdl) {
-	D_ASSERT(mode == WEB_SOCKET);
-	if (!message) {
-		return;
-	}
-	MemoryStream write_stream;
-	message->ToMemoryStream(write_stream);
-	try {
-		c.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-	} catch (websocketpp::exception const &e) {
-		throw IOException(e.what());
-	}
-
-	message.reset();
-}
-
-void RpcClient::Schedule(unique_ptr<ProtocolMessage> message_p) {
-	if (mode == WEB_SOCKET) {
-		message = std::move(message_p);
-	}
-	if (mode == UNIX_SOCKET) {
-		Send(std::move(message_p));
-	}
-}
-
 // TODO too much overlap with SendInternal
 void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
+	D_ASSERT(message_p);
 	if (mode == WEB_SOCKET) {
-		if (!message_p) {
-			return;
-		}
 		try {
+			while (!connection_open) {
+				usleep(10);
+			}
+
 			MemoryStream write_stream;
 			message_p->ToMemoryStream(write_stream);
 			c.send(con, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);

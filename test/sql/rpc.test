@@ -4,7 +4,7 @@
 
 require rpc
 
-foreach server '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:4242'
+foreach server '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:4243'
 
 statement ok con1
 select start_rpc_server(${server});

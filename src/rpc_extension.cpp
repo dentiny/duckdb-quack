@@ -107,9 +107,10 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 
 	auto &client = RcpcStorageExtensionInfo::GetState(*context.db).FindOrCreateClient(context, uri);
 
-	client.Schedule(make_uniq<BindRequestMessage>(query));
+	// TODO combine send and wait?!
+	client.Send(make_uniq<BindRequestMessage>(query));
+	auto bind_response = client.WaitForMessage<BindResponseMessage>();
 
-	auto bind_response = client.WaitForMessageType<BindResponseMessage>();
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
@@ -135,14 +136,14 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 	if (!function_state.did_execute) {
 		bind_data.client.Send(make_uniq<ExecuteRequestMessage>(bind_data.query));
 		// TODO we don't do anything with this>
-		auto execute_response = bind_data.client.WaitForMessageType<ExecuteResponseMessage>();
+		auto execute_response = bind_data.client.WaitForMessage<ExecuteResponseMessage>();
 		// now we do the first fetch
 		bind_data.client.Send(make_uniq<FetchRequestMessage>());
 		function_state.did_execute = true;
 	}
 
 	if (!function_state.done) {
-		auto fetch_response = bind_data.client.WaitForMessageType<FetchResponseMessage>();
+		auto fetch_response = bind_data.client.WaitForMessage<FetchResponseMessage>();
 		if (fetch_response->ResponseData() && fetch_response->ResponseData()->size() > 0) {
 			output.Reference(*fetch_response->ResponseData());
 			output.SetCardinality(fetch_response->ResponseData()->size());

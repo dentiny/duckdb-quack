@@ -6,6 +6,7 @@
 
 using namespace duckdb;
 
+typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
@@ -162,7 +163,6 @@ void RpcServer::HandleMessage(ProtocolMessage &received_message,
 	switch (received_message.Type()) {
 	case MessageType::BIND_REQUEST: {
 		auto bind_request_message = received_message.Cast<BindRequestMessage>();
-		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
 		auto prepare_result = internal_connection.Prepare(bind_request_message.Query());
 		if (prepare_result->HasError()) {
 			send_fun(make_uniq<ErrorMessage>(prepare_result->GetError()));
