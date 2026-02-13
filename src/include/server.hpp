@@ -22,7 +22,7 @@ class ProtocolMessage;
 struct RpcServer {
 	RpcServer(ClientContext &context_p);
 
-	void Listen(uint32_t port);
+	void Listen(const string &listen_string);
 
 	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
 	void HandleMessage(ProtocolMessage &received_message, std::function<void(unique_ptr<ProtocolMessage>)> send_fun);

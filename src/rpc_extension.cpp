@@ -6,6 +6,7 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
+#include "duckdb/storage/storage_extension.hpp"
 
 #define ASIO_STANDALONE // no boost!
 
@@ -23,17 +24,45 @@ using websocketpp::lib::placeholders::_2;
 
 namespace duckdb {
 
-static unique_ptr<RpcServer> rpc_server; // TODO evil global
+const static std::string STORAGE_EXTENSION_KEY = "rpc";
+
+class RcpcStorageExtensionInfo : public StorageExtensionInfo {
+public:
+	static RcpcStorageExtensionInfo &GetState(const DatabaseInstance &instance);
+
+	RpcServer &FindOrCreateServer(ClientContext &context, const std::string &listen_string) {
+		std::lock_guard<std::mutex> lock(server_mutex);
+		auto it = servers.find(listen_string);
+		if (it == servers.end()) {
+			auto server = make_uniq<RpcServer>(context);
+			server->Listen(listen_string);
+			servers.emplace(listen_string, std::move(server));
+			return *servers[listen_string];
+		} else {
+			return *it->second;
+		}
+	}
+
+private:
+	std::mutex server_mutex;
+	unordered_map<string, unique_ptr<RpcServer>> servers;
+};
 
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	D_ASSERT(args.AllConstant());
-	auto port = args.GetValue(0, 0).GetValue<uint32_t>();
-	if (rpc_server) {
-		return;
+	auto port = args.GetValue(0, 0).GetValue<string>();
+	auto &rpc_state = RcpcStorageExtensionInfo::GetState(*state.GetContext().db);
+	rpc_state.FindOrCreateServer(state.GetContext(), "");
+	result.SetValue(0, StringUtil::Format("Listening on %s", port));
+}
+
+RcpcStorageExtensionInfo &RcpcStorageExtensionInfo::GetState(const DatabaseInstance &instance) {
+	auto &config = instance.config;
+	auto ext = StorageExtension::Find(config, STORAGE_EXTENSION_KEY);
+	if (!ext) {
+		throw std::runtime_error("Fatal error: couldn't find rpc extension state.");
 	}
-	rpc_server = make_uniq<RpcServer>(state.GetContext());
-	rpc_server->Listen(port);
-	result.SetValue(0, StringUtil::Format("Listening on port %d", port));
+	return *static_cast<RcpcStorageExtensionInfo *>(ext->storage_info.get());
 }
 
 struct RpcTableBindData : FunctionData {
@@ -52,10 +81,6 @@ struct RpcTableBindData : FunctionData {
 	}
 };
 
-// FIXME add some function data
-static bool did_execute = false;
-static bool done = false;
-
 static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
                                                 vector<LogicalType> &return_types, vector<string> &names) {
 	// Set logging to be pretty verbose (everything except message payloads)
@@ -73,46 +98,59 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 	auto res = make_uniq<RpcTableBindData>();
 	res->client = std::move(client);
 	res->query = query;
-	did_execute = false;
 
 	return res;
 }
 
+struct RpcTableFunctionState : GlobalTableFunctionState {
+	bool did_execute = false;
+	bool done = false;
+};
+
+static unique_ptr<GlobalTableFunctionState> RpcTableFunInit(ClientContext &context, TableFunctionInitInput &input) {
+	return make_uniq<RpcTableFunctionState>();
+}
+
 static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
 	auto &bind_data = input.bind_data->Cast<RpcTableBindData>();
+	auto &function_state = input.global_state->Cast<RpcTableFunctionState>();
+
 	auto &client = *bind_data.client;
 
-	if (!did_execute) {
+	if (!function_state.did_execute) {
 		client.Send(make_uniq<ExecuteRequestMessage>(bind_data.query));
 		// TODO we don't do anything with this>
-		client.WaitForMessageType<ExecuteResponseMessage>();
+		auto execute_response = client.WaitForMessageType<ExecuteResponseMessage>();
 		// now we do the first fetch
 		client.Send(make_uniq<FetchRequestMessage>());
-		did_execute = true;
-		done = false;
+		function_state.did_execute = true;
 	}
 
-	if (!done) {
+	if (!function_state.done) {
 		auto fetch_response = client.WaitForMessageType<FetchResponseMessage>();
 		if (fetch_response->ResponseData() && fetch_response->ResponseData()->size() > 0) {
 			output.Reference(*fetch_response->ResponseData());
 			output.SetCardinality(fetch_response->ResponseData()->size());
 		} else {
-			done = true;
+			function_state.done = true;
 		}
 	}
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
-	// Register a scalar function
 	auto rpc_scalar_function =
-	    ScalarFunction("start_rpc_server", {LogicalType::UINTEGER}, LogicalType::VARCHAR, RpcScalarFun);
+	    ScalarFunction("start_rpc_server", {LogicalType::VARCHAR}, LogicalType::VARCHAR, RpcScalarFun);
 	rpc_scalar_function.stability = FunctionStability::VOLATILE;
 	loader.RegisterFunction(rpc_scalar_function);
 
-	auto rpc_table_function =
-	    TableFunction("call_rpc_server", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcTableFun, RpcTableBindFun);
+	auto rpc_table_function = TableFunction("call_rpc_server", {LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                                        RpcTableFun, RpcTableBindFun, RpcTableFunInit);
 	loader.RegisterFunction(rpc_table_function);
+
+	// (ab)use storage extension info to store our state
+	auto ext = duckdb::make_shared_ptr<duckdb::StorageExtension>();
+	ext->storage_info = duckdb::make_uniq<RcpcStorageExtensionInfo>();
+	StorageExtension::Register(loader.GetDatabaseInstance().config, STORAGE_EXTENSION_KEY, ext);
 }
 
 void RpcExtension::Load(ExtensionLoader &loader) {

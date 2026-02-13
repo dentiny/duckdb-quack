@@ -132,20 +132,22 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 	}
 }
 
-void RpcServer::Listen(uint32_t port) {
-	s.listen(port);
+void RpcServer::Listen(const string &listen_string) {
+	if (StringUtil::StartsWith(listen_string, "wss:")) {
+		s.listen(atoi(StringUtil::Replace(listen_string, "wss:", "").c_str()));
 
-	// TODO make this cancellable
-	listen_thread = std::thread([=]() {
-		ListenThread(this);
-		return 1;
-	});
-
-	// TODO make this cancellable
-	unix_socket_thread = std::thread([=]() {
-		ListenUnixSocketThread(this);
-		return 1;
-	});
+		// TODO make this cancellable
+		listen_thread = std::thread([=]() {
+			ListenThread(this);
+			return 1;
+		});
+	} else {
+		// TODO make this cancellable
+		unix_socket_thread = std::thread([=]() {
+			ListenUnixSocketThread(this);
+			return 1;
+		});
+	}
 }
 
 // main switcheroo happens here

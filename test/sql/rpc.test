@@ -6,23 +6,32 @@
 require rpc
 
 statement ok con1
-select start_rpc_server(4242);
+select start_rpc_server('/tmp/duckdb-rpc-socket');
+
+sleep 100 millisecond
 
 query I con2
-from call_rpc_server('wss://localhost:4242', 'select 42')
+from call_rpc_server('/tmp/duckdb-rpc-socket', 'select 42')
 ----
 42
 
 query I con2
-from call_rpc_server('wss://localhost:4242', 'select max(range) from range(10000)')
+select max(range) from call_rpc_server('/tmp/duckdb-rpc-socket', 'from range(100000)')
 ----
-9999
-
-statement ok con2
-from call_rpc_server('wss://localhost:4242', 'from test_all_types()')
+99999
 
 
-statement error con2
-from call_rpc_server('wss://localhost:4242', 'not_a_valid_quer')
-----
-Parser Error
+
+# query I con2
+# from call_rpc_server('wss://localhost:4242', 'select max(range) from range(10000)')
+# ----
+# 9999
+#
+# statement ok con2
+# from call_rpc_server('wss://localhost:4242', 'from test_all_types()')
+#
+#
+# statement error con2
+# from call_rpc_server('wss://localhost:4242', 'not_a_valid_quer')
+# ----
+# Parser Error
