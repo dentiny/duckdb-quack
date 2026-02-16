@@ -75,16 +75,14 @@ RpcServer::~RpcServer() {
 	s.stop();
 }
 
-static void ListenThread(void *rpc_server_p) {
-	auto rpc_server = (RpcServer *)rpc_server_p;
+static void ListenThread(RpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
 	rpc_server->s.start_accept();
 	rpc_server->s.run();
 }
 
-static void ListenUnixSocketThread(void *rpc_server_p) {
-	auto rpc_server = (RpcServer *)rpc_server_p;
+static void ListenUnixSocketThread(RpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
 	auto server_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -99,19 +97,20 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 
 	auto unlink_result = unlink(socket_address.sun_path);
 	if (unlink_result && errno != ENOENT) {
-		throw IOException("Error cleaning up socket %s: %s", (const char *)socket_address.sun_path, strerror(errno));
+		throw IOException("Error cleaning up socket %s: %s", rpc_server->listen_string, strerror(errno));
 	}
 
-	if (bind(server_socket_fd, (sockaddr *)&socket_address, SUN_LEN(&socket_address)) ||
+	if (bind(server_socket_fd, reinterpret_cast<sockaddr *>(&socket_address), SUN_LEN(&socket_address)) ||
 	    listen(server_socket_fd, 42 /* TODO: magic constant */)) {
-		throw IOException("Error listening to socket %s: %s", (const char *)socket_address.sun_path, strerror(errno));
+		throw IOException("Error listening to socket %s: %s", rpc_server->listen_string, strerror(errno));
 	}
 
 	while (true) {
 		int client_socket_fd = 0;
 
 		unsigned int sock_len = 0;
-		if ((client_socket_fd = accept(server_socket_fd, (sockaddr *)&socket_address, &sock_len)) == -1) {
+		if ((client_socket_fd = accept(server_socket_fd, reinterpret_cast<sockaddr *>(&socket_address), &sock_len)) ==
+		    -1) {
 			continue;
 		}
 
@@ -122,7 +121,7 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 				auto received_message = ProtocolMessage::FromSocket(client_socket_fd);
 				auto response_message = rpc_server->HandleMessage(*received_message);
 				response_message->ToSocket(client_socket_fd);
-			} catch (IOException e) {
+			} catch (IOException) {
 				open = false;
 			}
 
@@ -216,7 +215,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	}
 }
 
-void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
+void RpcServer::OnMessage(const websocketpp::connection_hdl hdl, message_ptr msg) {
 	MemoryStream read_stream((data_ptr_t)msg->get_payload().data(), msg.get()->get_payload().size());
 	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
 	auto response_message = HandleMessage(*received_message);
@@ -227,7 +226,7 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 		s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 	} catch (websocketpp::exception const &e) {
 		// TODO we should not fail here but log something
-		std::cout << "bind reply failed because: "
+		std::cout << "sending reply failed because: "
 		          << "(" << e.what() << ")" << std::endl;
 	}
 }
