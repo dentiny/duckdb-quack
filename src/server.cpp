@@ -113,7 +113,7 @@ static void ListenUnixSocketThread(RpcServer *rpc_server) {
 			continue;
 		}
 
-		std::thread accept_thread([client_socket_fd, rpc_server] {
+		std::thread accept_thread([rpc_server, client_socket_fd] {
 			bool open = true;
 			do {
 				try {
@@ -176,6 +176,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		auto prepare_request_message = received_message.Cast<PrepareRequestMessage>();
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(prepare_request_message.ConnectionId());
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
+		rpc_connection->duckdb_query_result.reset();
 		auto statement = rpc_connection->duckdb_connection->Prepare(prepare_request_message.Query());
 		if (statement->HasError()) {
 			return make_uniq<ErrorMessage>(statement->GetError());
@@ -195,14 +196,18 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		auto fetch_request_message = received_message.Cast<FetchRequestMessage>();
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(fetch_request_message.ConnectionId());
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
-		if (!rpc_connection->duckdb_query_result || rpc_connection->duckdb_query_result->HasError()) {
+		// TODO this logic is overly complicated - we only want to return an error if there is an actual one
+		if (!rpc_connection->duckdb_query_result) {
+			return make_uniq<FetchResponseMessage>(nullptr);
+		}
+		if (rpc_connection->duckdb_query_result && rpc_connection->duckdb_query_result->HasError()) {
 			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result
 			                                   ? rpc_connection->duckdb_query_result->GetError()
 			                                   : "No query result found");
 		}
 		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
 
-		if (rpc_connection->duckdb_query_result->HasError()) {
+		if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
 			rpc_connection->duckdb_query_result.reset();
 			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 		}

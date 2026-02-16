@@ -110,6 +110,9 @@ struct RpcGlobalState : GlobalTableFunctionState {
 	RpcGlobalState() {
 		done = false;
 	}
+	idx_t MaxThreads() const override {
+		return 10; // TODO max_threads?
+	}
 };
 
 static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const FunctionData *bind_data_p) {
