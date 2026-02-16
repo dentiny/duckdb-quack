@@ -200,10 +200,8 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		if (!rpc_connection->duckdb_query_result) {
 			return make_uniq<FetchResponseMessage>(nullptr);
 		}
-		if (rpc_connection->duckdb_query_result && rpc_connection->duckdb_query_result->HasError()) {
-			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result
-			                                   ? rpc_connection->duckdb_query_result->GetError()
-			                                   : "No query result found");
+		if (rpc_connection->duckdb_query_result->HasError()) {
+			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 		}
 		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
 
@@ -215,7 +213,6 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 			rpc_connection->duckdb_query_result.reset();
 			return make_uniq<FetchResponseMessage>(nullptr);
 		}
-		// FIXME send column data collection instead?
 		return make_uniq<FetchResponseMessage>(std::move(result_chunk));
 	}
 	default: {
