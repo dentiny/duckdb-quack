@@ -1,5 +1,6 @@
 #include "server.hpp"
 #include "message.hpp"
+#include "ssl_key_generator.hpp"
 
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
@@ -7,7 +8,6 @@
 
 using namespace duckdb;
 
-typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
@@ -16,7 +16,7 @@ static std::string get_password() {
 }
 
 // TLS init gunk...
-static context_ptr OnTlsInit(tls_mode mode, const websocketpp::connection_hdl &hdl) {
+context_ptr RpcServer::OnTlsInit(tls_mode mode, const websocketpp::connection_hdl &hdl) {
 	namespace asio = websocketpp::lib::asio;
 
 	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
@@ -32,14 +32,27 @@ static context_ptr OnTlsInit(tls_mode mode, const websocketpp::connection_hdl &h
 			                 asio::ssl::context::no_sslv3 | asio::ssl::context::single_dh_use);
 		}
 		ctx->set_password_callback(bind(&get_password));
-		ctx->use_certificate_chain_file("server.pem");
-		ctx->use_private_key_file("key.pem", asio::ssl::context::pem);
 
-		// Example method of generating this file:
-		// `openssl dhparam -out dh.pem 2048`
-		// Mozilla Intermediate suggests 1024 as the minimum size to use
-		// Mozilla Modern suggests 2048 as the minimum size to use.
-		ctx->use_tmp_dh_file("dh.pem");
+		// FIXME!!!!
+		// auto& fs = FileSystem::GetFileSystem(*db);
+		// auto certificate_directory = SslKeyGenerator::GetDefaultCertificateDirectory(fs);
+
+		// auto server_key_file = fs.JoinPath(certificate_directory, "server.pem");
+		// auto private_key_file = fs.JoinPath(certificate_directory, "private_key.pem");
+		// auto dh_param_file = fs.JoinPath(certificate_directory, "dh.pem");
+		//
+		// if (!fs.FileExists(server_key_file) || !fs.FileExists(private_key_file) || !fs.FileExists(dh_param_file)) {
+		// 	throw InvalidInputException("Certificate files not found in %s - use rpc_generate_keys() to generate them",
+		// certificate_directory.c_str());
+		// }
+		//
+		auto server_key_file = "/Users/hannes/.duckdb/extension_data/rpc/server.pem";
+		auto private_key_file = "/Users/hannes/.duckdb/extension_data/rpc/private_key.pem";
+		auto dh_param_file = "/Users/hannes/.duckdb/extension_data/rpc/dh.pem";
+
+		ctx->use_certificate_chain_file(server_key_file);
+		ctx->use_private_key_file(private_key_file, asio::ssl::context::pem);
+		ctx->use_tmp_dh_file(dh_param_file);
 
 		std::string ciphers;
 
@@ -103,7 +116,7 @@ void RpcServer::UnixSocketListenThread(RpcServer *rpc_server) {
 	}
 
 	if (bind(server_socket_fd, reinterpret_cast<sockaddr *>(&socket_address), SUN_LEN(&socket_address)) ||
-	    listen(server_socket_fd, 42 /* TODO: magic constant */)) {
+	    listen(server_socket_fd, 100 /* TODO: magic constant for connect queue length, should be fine */)) {
 		throw IOException("Error listening to socket %s: %s", rpc_server->listen_string, strerror(errno));
 	}
 
@@ -144,7 +157,7 @@ void RpcServer::Listen(const string &listen_string_p) {
 	listen_string = listen_string_p;
 	if (StringUtil::StartsWith(listen_string, "wss:")) {
 		websocket_server.set_access_channels(websocketpp::log::alevel::none);
-		websocket_server.set_tls_init_handler(bind(&OnTlsInit, MOZILLA_INTERMEDIATE, ::_1));
+		websocket_server.set_tls_init_handler(bind(&RpcServer::OnTlsInit, MOZILLA_INTERMEDIATE, ::_1));
 		websocket_server.set_message_handler(bind(&RpcServer::OnMessage, this, ::_1, ::_2));
 		websocket_server.init_asio();
 
@@ -232,9 +245,9 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
 
 		if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
-			// TODO this gonna crash
+			auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 			rpc_connection->duckdb_query_result.reset();
-			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
+			return error;
 		}
 		if (!result_chunk || result_chunk->size() == 0) {
 			rpc_connection->duckdb_query_result.reset();

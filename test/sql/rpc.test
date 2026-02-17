@@ -4,6 +4,9 @@
 
 require rpc
 
+statement ok
+select rpc_generate_keys();
+
 foreach server '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:4243'
 
 statement ok con1
