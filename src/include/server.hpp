@@ -18,25 +18,17 @@ enum tls_mode { MOZILLA_INTERMEDIATE = 1, MOZILLA_MODERN = 2 };
 class ClientContext;
 class ProtocolMessage;
 
-struct RpcServer {
+struct RpcConnection {
+	mutex lock;
+	unique_ptr<Connection> duckdb_connection;
+	unique_ptr<QueryResult> duckdb_query_result;
+};
+
+class RpcServer {
+public:
 	explicit RpcServer(ClientContext &context_p);
-
 	void Listen(const string &listen_string);
-
-	void OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg);
-	unique_ptr<ProtocolMessage> HandleMessage(ProtocolMessage &received_message);
-
-	ClientContext &context;
-
 	~RpcServer();
-
-	std::mutex active_connections_mutex;
-	struct RpcConnection {
-		mutex lock;
-		unique_ptr<Connection> duckdb_connection;
-		unique_ptr<QueryResult> duckdb_query_result;
-	};
-	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
 
 	// TODO move this to implementation
 	optional_ptr<RpcConnection> GetConnection(const string &connection_id) {
@@ -55,18 +47,25 @@ struct RpcServer {
 		D_ASSERT(active_connections.find(connection_id) == active_connections.end());
 
 		auto new_connection = make_uniq<RpcConnection>();
-		new_connection->duckdb_connection = make_uniq<Connection>(*context.db);
+		new_connection->duckdb_connection = make_uniq<Connection>(*db);
 		active_connections[connection_id] = std::move(new_connection);
 		return connection_id;
 	}
 
 	// TODO need something to destroy connections
 
-	std::thread listen_thread;
-	std::thread unix_socket_thread;
+private:
+	void OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg);
+	unique_ptr<ProtocolMessage> HandleMessage(ProtocolMessage &received_message);
+	static void WebsocketListenThread(RpcServer *rpc_server);
+	static void UnixSocketListenThread(RpcServer *rpc_server);
 
-	server s;
-
+private:
+	shared_ptr<DatabaseInstance> db;
 	string listen_string;
+	std::mutex active_connections_mutex;
+	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
+	std::thread listen_thread;
+	server websocket_server;
 };
 } // namespace duckdb

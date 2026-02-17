@@ -70,21 +70,21 @@ static context_ptr OnTlsInit(tls_mode mode, const websocketpp::connection_hdl &h
 	return ctx;
 }
 
-RpcServer::RpcServer(ClientContext &context_p) : context(context_p) {
+RpcServer::RpcServer(ClientContext &context_p) : db(context_p.db) {
 }
 
 RpcServer::~RpcServer() {
-	s.stop();
+	websocket_server.stop();
 }
 
-static void ListenThread(RpcServer *rpc_server) {
+void RpcServer::WebsocketListenThread(RpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
-	rpc_server->s.start_accept();
-	rpc_server->s.run();
+	rpc_server->websocket_server.start_accept();
+	rpc_server->websocket_server.run();
 }
 
-static void ListenUnixSocketThread(RpcServer *rpc_server) {
+void RpcServer::UnixSocketListenThread(RpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
 	auto server_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -143,25 +143,25 @@ void RpcServer::Listen(const string &listen_string_p) {
 	}
 	listen_string = listen_string_p;
 	if (StringUtil::StartsWith(listen_string, "wss:")) {
-		s.set_access_channels(websocketpp::log::alevel::none);
-		s.set_tls_init_handler(bind(&OnTlsInit, MOZILLA_INTERMEDIATE, ::_1));
-		s.set_message_handler(bind(&RpcServer::OnMessage, this, ::_1, ::_2));
-		s.init_asio();
+		websocket_server.set_access_channels(websocketpp::log::alevel::none);
+		websocket_server.set_tls_init_handler(bind(&OnTlsInit, MOZILLA_INTERMEDIATE, ::_1));
+		websocket_server.set_message_handler(bind(&RpcServer::OnMessage, this, ::_1, ::_2));
+		websocket_server.init_asio();
 
 		// TODO this is overly simplistic but fine for now
 		auto listen_port = atoi(StringUtil::Replace(listen_string, "wss://localhost:", "").c_str());
 		if (listen_port < 1 || listen_port > 65535) {
 			throw InvalidInputException("Invalid port specified for websocket server (%d)", listen_port);
 		}
-		s.listen(listen_port);
+		websocket_server.listen(listen_port);
 
 		listen_thread = std::thread([=]() {
-			ListenThread(this);
+			WebsocketListenThread(this);
 			return 1;
 		});
 	} else {
-		unix_socket_thread = std::thread([=]() {
-			ListenUnixSocketThread(this);
+		listen_thread = std::thread([=]() {
+			UnixSocketListenThread(this);
 			return 1;
 		});
 	}
@@ -256,7 +256,8 @@ void RpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_
 	MemoryStream write_stream;
 	response_message->ToMemoryStream(write_stream);
 	try {
-		s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+		websocket_server.send(hdl, write_stream.GetData(), write_stream.GetPosition(),
+		                      websocketpp::frame::opcode::binary);
 	} catch (websocketpp::exception const &e) {
 		// TODO we should not fail here but log something
 		std::cout << "sending reply failed because: "
