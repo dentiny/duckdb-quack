@@ -24,7 +24,7 @@ std::string SslKeyGenerator::GetDefaultCertificateDirectory(FileSystem &fs) {
 }
 
 const int RSA_KEY_LENGTH = 4096;
-const int DH_PARAM_LENGTH = 4096;
+const int DH_PARAM_LENGTH = 2048;
 
 void SslKeyGenerator::GenerateSslKeys(const std::string &cert_filename, const std::string &private_key_filename,
                                       const std::string &dh_filename, size_t cert_days_valid) {
@@ -105,12 +105,11 @@ void SslKeyGenerator::GenerateSslKeys(const std::string &cert_filename, const st
 
 	{
 		// create dh parameters
-		std::unique_ptr<EVP_PKEY_CTX, void (*)(EVP_PKEY_CTX *)> dh_ctx {create_context(EVP_PKEY_DSA),
-		                                                                EVP_PKEY_CTX_free};
+		std::unique_ptr<EVP_PKEY_CTX, void (*)(EVP_PKEY_CTX *)> dh_ctx {create_context(EVP_PKEY_DH), EVP_PKEY_CTX_free};
 
 		EVP_PKEY *dh_ptr = nullptr;
 		if (EVP_PKEY_paramgen_init(dh_ctx.get()) <= 0 ||
-		    EVP_PKEY_CTX_set_dsa_paramgen_bits(dh_ctx.get(), DH_PARAM_LENGTH) <= 0 ||
+		    EVP_PKEY_CTX_set_dh_paramgen_prime_len(dh_ctx.get(), DH_PARAM_LENGTH) <= 0 ||
 		    EVP_PKEY_paramgen(dh_ctx.get(), &dh_ptr) <= 0) {
 			throw std::runtime_error("Error creating DH parameters");
 		}
