@@ -11,44 +11,35 @@ using namespace duckdb;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
-static std::string get_password() {
+static std::string GetCertificatePassword() {
 	throw InternalException("get_password called without a valid password");
 }
+// 1294 default port? seems to be unused
 
 // TLS init gunk...
-context_ptr RpcServer::OnTlsInit(tls_mode mode, const websocketpp::connection_hdl &hdl) {
+context_ptr RpcServer::OnTlsInit(RpcServer *rpc_server, const websocketpp::connection_hdl &) {
+	D_ASSERT(rpc_server);
 	namespace asio = websocketpp::lib::asio;
 
 	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
 
 	try {
-		if (mode == MOZILLA_MODERN) {
-			// Modern disables TLSv1
-			ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-			                 asio::ssl::context::no_sslv3 | asio::ssl::context::no_tlsv1 |
-			                 asio::ssl::context::single_dh_use);
-		} else {
-			ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-			                 asio::ssl::context::no_sslv3 | asio::ssl::context::single_dh_use);
+		ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
+		                 asio::ssl::context::no_sslv3 | asio::ssl::context::single_dh_use);
+
+		// TODO, make this a secret?
+		ctx->set_password_callback(bind(&GetCertificatePassword));
+
+		auto &fs = FileSystem::GetFileSystem(*rpc_server->db);
+		auto certificate_directory = SslKeyGenerator::GetDefaultCertificateDirectory(fs);
+		auto server_key_file = fs.JoinPath(certificate_directory, "server.pem");
+		auto private_key_file = fs.JoinPath(certificate_directory, "private_key.pem");
+		auto dh_param_file = fs.JoinPath(certificate_directory, "dh.pem");
+
+		if (!fs.FileExists(server_key_file) || !fs.FileExists(private_key_file) || !fs.FileExists(dh_param_file)) {
+			throw InvalidInputException("Certificate files not found in %s - use rpc_generate_keys() to generate them",
+			                            certificate_directory.c_str());
 		}
-		ctx->set_password_callback(bind(&get_password));
-
-		// FIXME!!!!
-		// auto& fs = FileSystem::GetFileSystem(*db);
-		// auto certificate_directory = SslKeyGenerator::GetDefaultCertificateDirectory(fs);
-
-		// auto server_key_file = fs.JoinPath(certificate_directory, "server.pem");
-		// auto private_key_file = fs.JoinPath(certificate_directory, "private_key.pem");
-		// auto dh_param_file = fs.JoinPath(certificate_directory, "dh.pem");
-		//
-		// if (!fs.FileExists(server_key_file) || !fs.FileExists(private_key_file) || !fs.FileExists(dh_param_file)) {
-		// 	throw InvalidInputException("Certificate files not found in %s - use rpc_generate_keys() to generate them",
-		// certificate_directory.c_str());
-		// }
-		//
-		auto server_key_file = "/Users/hannes/.duckdb/extension_data/rpc/server.pem";
-		auto private_key_file = "/Users/hannes/.duckdb/extension_data/rpc/private_key.pem";
-		auto dh_param_file = "/Users/hannes/.duckdb/extension_data/rpc/dh.pem";
 
 		ctx->use_certificate_chain_file(server_key_file);
 		ctx->use_private_key_file(private_key_file, asio::ssl::context::pem);
@@ -56,23 +47,14 @@ context_ptr RpcServer::OnTlsInit(tls_mode mode, const websocketpp::connection_hd
 
 		std::string ciphers;
 
-		if (mode == MOZILLA_MODERN) {
-			ciphers = "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-"
-			          "ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-DSS-AES128-GCM-SHA256:kEDH+AESGCM:ECDHE-"
-			          "RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-"
-			          "RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:DHE-RSA-"
-			          "AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA:"
-			          "DHE-RSA-AES256-SHA:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!3DES:!MD5:!PSK";
-		} else {
-			ciphers = "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-"
-			          "ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-DSS-AES128-GCM-SHA256:kEDH+AESGCM:ECDHE-"
-			          "RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-"
-			          "RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:DHE-RSA-"
-			          "AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA:"
-			          "DHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:"
-			          "AES256-SHA:AES:CAMELLIA:DES-CBC3-SHA:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!aECDH:!EDH-DSS-"
-			          "DES-CBC3-SHA:!EDH-RSA-DES-CBC3-SHA:!KRB5-DES-CBC3-SHA";
-		}
+		ciphers = "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-"
+		          "ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-DSS-AES128-GCM-SHA256:kEDH+AESGCM:ECDHE-"
+		          "RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-"
+		          "RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:DHE-RSA-"
+		          "AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA:"
+		          "DHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:"
+		          "AES256-SHA:AES:CAMELLIA:DES-CBC3-SHA:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!aECDH:!EDH-DSS-"
+		          "DES-CBC3-SHA:!EDH-RSA-DES-CBC3-SHA:!KRB5-DES-CBC3-SHA";
 
 		if (SSL_CTX_set_cipher_list(ctx->native_handle(), ciphers.c_str()) != 1) {
 			throw InternalException("Error setting cipher list");
@@ -157,7 +139,7 @@ void RpcServer::Listen(const string &listen_string_p) {
 	listen_string = listen_string_p;
 	if (StringUtil::StartsWith(listen_string, "wss:")) {
 		websocket_server.set_access_channels(websocketpp::log::alevel::none);
-		websocket_server.set_tls_init_handler(bind(&RpcServer::OnTlsInit, MOZILLA_INTERMEDIATE, ::_1));
+		websocket_server.set_tls_init_handler(bind(&RpcServer::OnTlsInit, this, ::_1));
 		websocket_server.set_message_handler(bind(&RpcServer::OnMessage, this, ::_1, ::_2));
 		websocket_server.init_asio();
 

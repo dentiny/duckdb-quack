@@ -14,8 +14,6 @@ typedef websocketpp::server<websocketpp::config::asio_tls> server;
 typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 
-enum tls_mode { MOZILLA_INTERMEDIATE = 1, MOZILLA_MODERN = 2 };
-
 class ClientContext;
 class ProtocolMessage;
 
@@ -60,7 +58,7 @@ private:
 
 	unique_ptr<ProtocolMessage> HandleMessage(ProtocolMessage &received_message);
 
-	static context_ptr OnTlsInit(tls_mode mode, const websocketpp::connection_hdl &hdl);
+	static context_ptr OnTlsInit(RpcServer *rpc_server, const websocketpp::connection_hdl &hdl);
 	static void WebsocketListenThread(RpcServer *rpc_server);
 	static void UnixSocketListenThread(RpcServer *rpc_server);
 
