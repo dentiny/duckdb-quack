@@ -18,7 +18,7 @@ static context_ptr on_tls_init_client(const char *, websocketpp::connection_hdl)
 	return ctx;
 }
 
-void RpcClient::WebsocketListen() {
+void WebSocketRpcClient::WebsocketListen() {
 	websocketpp::lib::error_code ec;
 	websocket_connection = websocket_client.get_connection(uri, ec);
 	if (ec) {
@@ -29,71 +29,66 @@ void RpcClient::WebsocketListen() {
 	websocket_client.run();
 }
 
-static void ConnectionThread(RpcClient *rpc_client) {
+void WebSocketRpcClient::ConnectionThread(WebSocketRpcClient *rpc_client) {
 	D_ASSERT(rpc_client);
 	rpc_client->WebsocketListen();
 }
 
-RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
-	if (StringUtil::StartsWith(uri, "wss:")) {
-		mode = WEB_SOCKET;
-	} else {
-		mode = UNIX_SOCKET;
+UnixSocketRpcClient::UnixSocketRpcClient(const string &uri_p) : RpcClient(uri_p) {
+	D_ASSERT(!StringUtil::StartsWith(uri, "wss://"));
+
+	sockaddr_un remote;
+	unix_socket_fd = 0;
+	memset(&remote, 0, sizeof(sockaddr_un));
+
+	if ((unix_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+		throw IOException("Client: Error on socket() call %s", strerror(errno));
 	}
+	remote.sun_family = AF_UNIX;
+	strcpy(remote.sun_path, uri.c_str());
+	auto data_len = SUN_LEN(&remote);
 
-	if (mode == WEB_SOCKET) {
-		// some ugly setup
-		websocket_client.set_access_channels(websocketpp::log::alevel::none);
-		websocket_client.set_error_channels(websocketpp::log::alevel::none);
-		websocket_client.init_asio();
-		websocket_client.set_tls_init_handler(bind(&on_tls_init_client, "localhost", ::_1));
-		websocket_client.set_user_agent("DuckDB");
-		websocket_client.set_message_handler(bind(&RpcClient::OnMessage, this, ::_1, ::_2));
-		websocket_client.set_fail_handler(bind(&RpcClient::OnFail, this, ::_1));
-		websocket_client.set_open_handler(bind(&RpcClient::OnOpen, this, ::_1));
-
-		// launch ze background thread to listen
-		conn_thread = std::thread([=]() {
-			ConnectionThread(this);
-			return 1;
-		});
-	}
-	if (mode == UNIX_SOCKET) {
-		sockaddr_un remote;
-		unix_socket_fd = 0;
-		memset(&remote, 0, sizeof(sockaddr_un));
-
-		if ((unix_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
-			throw IOException("Client: Error on socket() call %s", strerror(errno));
-		}
-		remote.sun_family = AF_UNIX;
-		strcpy(remote.sun_path, uri.c_str());
-		auto data_len = SUN_LEN(&remote);
-
-		if (connect(unix_socket_fd, reinterpret_cast<sockaddr *>(&remote), data_len)) {
-			throw IOException("Client: Error on connect(%s) call: %s", uri, strerror(errno));
-		}
+	if (connect(unix_socket_fd, reinterpret_cast<sockaddr *>(&remote), data_len)) {
+		throw IOException("Client: Error on connect(%s) call: %s", uri, strerror(errno));
 	}
 }
 
-RpcClient::~RpcClient() {
-	if (mode == WEB_SOCKET) {
-		if (websocket_connection) {
-			websocket_connection->close(websocketpp::close::status::normal, "");
-		}
-		conn_thread.join();
-	}
-	if (mode == UNIX_SOCKET) {
-		// TODO check for errors etc.
-		close(unix_socket_fd);
-	}
+WebSocketRpcClient::WebSocketRpcClient(const string &uri_p) : RpcClient(uri_p) {
+	D_ASSERT(StringUtil::StartsWith(uri, "wss://"));
+
+	// some ugly setup
+	websocket_client.set_access_channels(websocketpp::log::alevel::none);
+	websocket_client.set_error_channels(websocketpp::log::alevel::none);
+	websocket_client.init_asio();
+	websocket_client.set_tls_init_handler(bind(&on_tls_init_client, "localhost", ::_1));
+	websocket_client.set_user_agent("DuckDB");
+	websocket_client.set_message_handler(bind(&WebSocketRpcClient::OnMessage, this, ::_1, ::_2));
+	websocket_client.set_fail_handler(bind(&WebSocketRpcClient::OnFail, this, ::_1));
+	websocket_client.set_open_handler(bind(&WebSocketRpcClient::OnOpen, this, ::_1));
+
+	// launch ze background thread to listen
+	websocket_listen_thread = std::thread([=]() {
+		ConnectionThread(this);
+		return 1;
+	});
 }
 
-void RpcClient::OnOpen(websocketpp::connection_hdl hdl_p) {
+WebSocketRpcClient::~WebSocketRpcClient() {
+	if (websocket_connection) {
+		websocket_connection->close(websocketpp::close::status::normal, "");
+	}
+	websocket_listen_thread.join();
+}
+
+UnixSocketRpcClient::~UnixSocketRpcClient() {
+	close(unix_socket_fd);
+}
+
+void WebSocketRpcClient::OnOpen(websocketpp::connection_hdl hdl_p) {
 	connection_open = true;
 }
 
-void RpcClient::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr msg) {
+void WebSocketRpcClient::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr msg) {
 	auto &payload = msg->get_payload();
 	MemoryStream wss_read_stream((data_ptr_t)payload.data(), payload.size());
 	auto received_message = ProtocolMessage::FromMemoryStream(wss_read_stream);
@@ -103,23 +98,27 @@ void RpcClient::OnMessage(const websocketpp::connection_hdl &hdl, const message_
 }
 
 // boo
-void RpcClient::OnFail(websocketpp::connection_hdl hdl) {
+void WebSocketRpcClient::OnFail(websocketpp::connection_hdl hdl) {
 	client::connection_ptr con = websocket_client.get_con_from_hdl(hdl);
 	// there is more error stuff to expose here if required
 	throw IOException("RPC request to %s failed: %s", uri, con->get_ec().message().c_str());
 }
 
-unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expected_type) {
+unique_ptr<ProtocolMessage> UnixSocketRpcClient::Receive() {
+	return ProtocolMessage::FromSocket(unix_socket_fd, read_stream);
+}
+
+unique_ptr<ProtocolMessage> WebSocketRpcClient::Receive() {
 	unique_ptr<ProtocolMessage> result;
-	if (mode == WEB_SOCKET) {
-		std::unique_lock<std::mutex> lock(messages_mutex);
-		messages_wait.wait(lock, [=] { return !messages.empty(); });
-		result = std::move(messages.back());
-		messages.pop_back();
-	}
-	if (mode == UNIX_SOCKET) {
-		result = ProtocolMessage::FromSocket(unix_socket_fd, read_stream);
-	}
+	std::unique_lock<std::mutex> lock(messages_mutex);
+	messages_wait.wait(lock, [=] { return !messages.empty(); });
+	result = std::move(messages.back());
+	messages.pop_back();
+	return result;
+}
+
+unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expected_type) {
+	auto result = Receive();
 	if (result->Type() != expected_type) {
 		if (result->Type() == MessageType::ERROR) {
 			throw IOException("Expected %s message, got error message instead: %s", MessageTypeToString(expected_type),
@@ -131,23 +130,23 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expect
 	return result;
 }
 
-void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
-	D_ASSERT(message_p);
-	if (mode == WEB_SOCKET) {
-		try {
-			// we have to wait till the connection is actually open on connect
-			while (!connection_open) {
-				usleep(10);
-			}
+void UnixSocketRpcClient::Send(unique_ptr<ProtocolMessage> message) {
+	D_ASSERT(message);
+	message->ToSocket(unix_socket_fd, write_stream);
+}
 
-			message_p->ToMemoryStream(write_stream);
-			websocket_client.send(websocket_connection, write_stream.GetData(), write_stream.GetPosition(),
-			                      websocketpp::frame::opcode::binary);
-		} catch (websocketpp::exception const &e) {
-			throw IOException(e.what());
+void WebSocketRpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
+	D_ASSERT(message_p);
+	try {
+		// we have to wait till the connection is actually open on connect
+		while (!connection_open) {
+			usleep(10);
 		}
-	}
-	if (mode == UNIX_SOCKET) {
-		message_p->ToSocket(unix_socket_fd, write_stream);
+
+		message_p->ToMemoryStream(write_stream);
+		websocket_client.send(websocket_connection, write_stream.GetData(), write_stream.GetPosition(),
+		                      websocketpp::frame::opcode::binary);
+	} catch (websocketpp::exception const &e) {
+		throw IOException(e.what());
 	}
 }

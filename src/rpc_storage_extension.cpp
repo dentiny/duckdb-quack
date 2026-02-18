@@ -21,7 +21,7 @@ RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, c
 	}
 	unique_ptr<RpcServer> server;
 	if (StringUtil::StartsWith(listen_string, "wss://")) {
-		server = make_uniq<WebsocketRpcServer>(context);
+		server = make_uniq<WebSocketRpcServer>(context);
 
 	} else {
 		server = make_uniq<UnixSocketRpcServer>(context);

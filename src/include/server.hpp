@@ -74,18 +74,18 @@ typedef websocketpp::server<websocketpp::config::asio_tls> server;
 typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 
-class WebsocketRpcServer : public RpcServer {
+class WebSocketRpcServer : public RpcServer {
 public:
-	WebsocketRpcServer(ClientContext &context_p) : RpcServer(context_p) {
+	WebSocketRpcServer(ClientContext &context_p) : RpcServer(context_p) {
 	}
 
 	void Listen(const string &listen_string) override;
-	~WebsocketRpcServer() override;
+	~WebSocketRpcServer() override;
 
 private:
 	void OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg);
-	static context_ptr OnTlsInit(WebsocketRpcServer *rpc_server, const websocketpp::connection_hdl &hdl);
-	static void WebsocketListenThread(WebsocketRpcServer *rpc_server);
+	static context_ptr OnTlsInit(WebSocketRpcServer *rpc_server, const websocketpp::connection_hdl &hdl);
+	static void WebsocketListenThread(WebSocketRpcServer *rpc_server);
 
 	server websocket_server;
 };

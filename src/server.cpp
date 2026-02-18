@@ -39,7 +39,7 @@ string RpcServer::CreateNewConnection() {
 }
 
 // TLS init gunk...
-context_ptr WebsocketRpcServer::OnTlsInit(WebsocketRpcServer *rpc_server, const websocketpp::connection_hdl &) {
+context_ptr WebSocketRpcServer::OnTlsInit(WebSocketRpcServer *rpc_server, const websocketpp::connection_hdl &) {
 	D_ASSERT(rpc_server);
 	namespace asio = websocketpp::lib::asio;
 
@@ -97,7 +97,7 @@ RpcServer::~RpcServer() {
 	}
 }
 
-WebsocketRpcServer::~WebsocketRpcServer() {
+WebSocketRpcServer::~WebSocketRpcServer() {
 	websocket_server.stop();
 }
 
@@ -107,7 +107,7 @@ UnixSocketRpcServer::~UnixSocketRpcServer() {
 	unix_socket_keep_listening = false;
 }
 
-void WebsocketRpcServer::WebsocketListenThread(WebsocketRpcServer *rpc_server) {
+void WebSocketRpcServer::WebsocketListenThread(WebSocketRpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
 	rpc_server->websocket_server.start_accept();
@@ -184,7 +184,7 @@ void UnixSocketRpcServer::Listen(const string &listen_string_p) {
 	});
 }
 
-void WebsocketRpcServer::Listen(const string &listen_string_p) {
+void WebSocketRpcServer::Listen(const string &listen_string_p) {
 	if (listen_string_p.empty()) {
 		throw InvalidInputException("Empty listen string specified");
 	}
@@ -192,8 +192,8 @@ void WebsocketRpcServer::Listen(const string &listen_string_p) {
 	listen_string = listen_string_p;
 	{
 		websocket_server.set_access_channels(websocketpp::log::alevel::none);
-		websocket_server.set_tls_init_handler(bind(&WebsocketRpcServer::OnTlsInit, this, ::_1));
-		websocket_server.set_message_handler(bind(&WebsocketRpcServer::OnMessage, this, ::_1, ::_2));
+		websocket_server.set_tls_init_handler(bind(&WebSocketRpcServer::OnTlsInit, this, ::_1));
+		websocket_server.set_message_handler(bind(&WebSocketRpcServer::OnMessage, this, ::_1, ::_2));
 		websocket_server.init_asio();
 
 		// TODO this is overly simplistic but fine for now
@@ -291,7 +291,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	}
 }
 
-void WebsocketRpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg) {
+void WebSocketRpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg) {
 	MemoryStream read_stream((data_ptr_t)msg->get_payload().data(), msg.get()->get_payload().size());
 	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
 	auto response_message = HandleMessage(*received_message);
