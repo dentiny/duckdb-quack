@@ -5,6 +5,7 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/common/render_tree.hpp"
+#include "duckdb/common/serializer/memory_stream.hpp"
 
 using namespace duckdb;
 
@@ -70,6 +71,10 @@ RpcServer::RpcServer(ClientContext &context_p) : db(context_p.db) {
 
 RpcServer::~RpcServer() {
 	websocket_server.stop();
+	// this should interrupt accept() in the listen thread
+	close(unix_socket_server_fd);
+	unix_socket_keep_listening = false;
+	listen_thread.join();
 }
 
 void RpcServer::WebsocketListenThread(RpcServer *rpc_server) {
@@ -82,8 +87,8 @@ void RpcServer::WebsocketListenThread(RpcServer *rpc_server) {
 void RpcServer::UnixSocketListenThread(RpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
-	auto server_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (server_socket_fd == -1) {
+	rpc_server->unix_socket_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (rpc_server->unix_socket_server_fd == -1) {
 		throw IOException("Error creating socket");
 	}
 
@@ -97,14 +102,17 @@ void RpcServer::UnixSocketListenThread(RpcServer *rpc_server) {
 		throw IOException("Error cleaning up socket %s: %s", rpc_server->listen_string, strerror(errno));
 	}
 
-	if (bind(server_socket_fd, reinterpret_cast<sockaddr *>(&socket_address), SUN_LEN(&socket_address)) ||
-	    listen(server_socket_fd, 100 /* TODO: magic constant for connect queue length, should be fine */)) {
+	if (bind(rpc_server->unix_socket_server_fd, reinterpret_cast<sockaddr *>(&socket_address),
+	         SUN_LEN(&socket_address)) ||
+	    listen(rpc_server->unix_socket_server_fd,
+	           100 /* TODO: magic constant for connect queue length, should be fine */)) {
 		throw IOException("Error listening to socket %s: %s", rpc_server->listen_string, strerror(errno));
 	}
 
-	while (true) {
+	while (rpc_server->unix_socket_keep_listening) {
 		unsigned int sock_len = 0;
-		auto client_socket_fd = accept(server_socket_fd, reinterpret_cast<sockaddr *>(&socket_address), &sock_len);
+		auto client_socket_fd =
+		    accept(rpc_server->unix_socket_server_fd, reinterpret_cast<sockaddr *>(&socket_address), &sock_len);
 		if (client_socket_fd == -1) {
 			continue;
 		}
@@ -155,6 +163,7 @@ void RpcServer::Listen(const string &listen_string_p) {
 			return 1;
 		});
 	} else {
+		unix_socket_keep_listening = true;
 		listen_thread = std::thread([=]() {
 			UnixSocketListenThread(this);
 			return 1;
@@ -258,4 +267,25 @@ void RpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_
 		std::cout << "sending reply failed because: "
 		          << "(" << e.what() << ")" << std::endl;
 	}
+}
+
+optional_ptr<RpcConnection> RpcServer::GetConnection(const string &connection_id) {
+	std::lock_guard<std::mutex> lock(active_connections_mutex);
+	auto it = active_connections.find(connection_id);
+	if (it != active_connections.end()) {
+		return it->second.get();
+	}
+	throw IOException("Invalid connection id %s", connection_id);
+}
+
+string RpcServer::CreateNewConnection() {
+	std::lock_guard<std::mutex> lock(active_connections_mutex);
+	// TODO this will need cryptographic randomness I fear
+	auto connection_id = StringUtil::GenerateRandomName(40);
+	D_ASSERT(active_connections.find(connection_id) == active_connections.end());
+
+	auto new_connection = make_uniq<RpcConnection>();
+	new_connection->duckdb_connection = make_uniq<Connection>(*db);
+	active_connections[connection_id] = std::move(new_connection);
+	return connection_id;
 }

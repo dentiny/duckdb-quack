@@ -2,11 +2,13 @@
 
 #define ASIO_STANDALONE // no boost!
 
-#include "duckdb/common/serializer/memory_stream.hpp"
+#include "duckdb/common/optional_ptr.hpp"
+#include "duckdb/common/mutex.hpp"
+
+// TODO don't like those includes here...
 #include "websocketpp/config/asio.hpp"
 #include "websocketpp/config/asio_client.hpp"
 #include "websocketpp/server.hpp"
-#include "duckdb/main/connection.hpp"
 
 namespace duckdb {
 
@@ -16,6 +18,10 @@ typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> conte
 
 class ClientContext;
 class ProtocolMessage;
+class Connection;
+class MemoryStream;
+class QueryResult;
+class DatabaseInstance;
 
 struct RpcConnection {
 	mutex lock;
@@ -26,32 +32,13 @@ struct RpcConnection {
 class RpcServer {
 public:
 	explicit RpcServer(ClientContext &context_p);
-	void Listen(const string &listen_string);
-	~RpcServer();
+	void Listen(const string &listen_string); // TODO should listen be part of the constructor?
 
-	// TODO move this to implementation
-	optional_ptr<RpcConnection> GetConnection(const string &connection_id) {
-		std::lock_guard<std::mutex> lock(active_connections_mutex);
-		auto it = active_connections.find(connection_id);
-		if (it != active_connections.end()) {
-			return it->second.get();
-		}
-		throw IOException("Invalid connection id");
-	}
-
-	string CreateNewConnection() {
-		std::lock_guard<std::mutex> lock(active_connections_mutex);
-		// TODO this will need cryptographic randomness I fear
-		auto connection_id = StringUtil::GenerateRandomName(40);
-		D_ASSERT(active_connections.find(connection_id) == active_connections.end());
-
-		auto new_connection = make_uniq<RpcConnection>();
-		new_connection->duckdb_connection = make_uniq<Connection>(*db);
-		active_connections[connection_id] = std::move(new_connection);
-		return connection_id;
-	}
-
+	optional_ptr<RpcConnection> GetConnection(const string &connection_id);
+	string CreateNewConnection();
 	// TODO need something to destroy connections
+
+	~RpcServer();
 
 private:
 	void OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg);
@@ -65,9 +52,11 @@ private:
 private:
 	shared_ptr<DatabaseInstance> db;
 	string listen_string;
-	std::mutex active_connections_mutex;
+	mutex active_connections_mutex;
 	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
 	std::thread listen_thread;
 	server websocket_server;
+	int unix_socket_server_fd;
+	bool unix_socket_keep_listening;
 };
 } // namespace duckdb
