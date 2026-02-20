@@ -104,6 +104,14 @@ static void RpcGenerateKeysFun(ClientContext &context, TableFunctionInput &data_
 		return;
 	}
 	SslKeyGenerator::GenerateSslKeys(server_key_file, private_key_file, dh_param_file, 3650);
+	if (chmod(server_key_file.c_str(), S_IRUSR) || chmod(private_key_file.c_str(), S_IRUSR) ||
+	    chmod(dh_param_file.c_str(), S_IRUSR)) {
+		unlink(server_key_file.c_str());
+		unlink(private_key_file.c_str());
+		unlink(dh_param_file.c_str());
+		throw IOException("Error setting permissions on key files");
+	}
+
 	output.data[0].SetValue(0, StringUtil::Format("Key files generated in %s", certificate_directory));
 }
 
