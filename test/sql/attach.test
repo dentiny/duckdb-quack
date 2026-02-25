@@ -4,8 +4,16 @@
 
 require rpc
 
+
+statement ok
+create schema moo;
+
 statement ok
 create table fuu as values(42, 43);
+
+statement ok
+create table moo.fuu2 as values(44, 45);
+
 
 statement ok
 call rpc_generate_keys();
@@ -27,6 +35,17 @@ query II
 from rpc.fuu;
 ----
 42	43
+
+query II
+from rpc.main.fuu;
+----
+42	43
+
+# TODO
+# query II
+# from rpc.moo.fuu2;
+# ----
+# 42	43
 
 statement ok con2
 detach rpc;

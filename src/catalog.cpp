@@ -70,10 +70,18 @@ RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const string &server_string_p)
     : Catalog(db_p), server_string(server_string_p), client(RpcClient::GetClient(server_string)) {
 	auto connection_response = client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
 	connection_id = connection_response->ConnectionId();
-	// TODO populate schemas?
-	RpcSchemaInfo info;
-	info.schema_name = "main";
-	schemas[info.schema_name] = make_uniq<RpcSchemaCatalogEntry>(*this, info);
+
+	// TODO a tiiny bit clunky this
+	auto schemata = ExecuteCommand("FROM information_schema.schemata SELECT catalog_name, schema_name WHERE "
+	                               "catalog_name NOT IN ('system', 'temp') ORDER BY ALL");
+	auto row_collection = make_uniq<ColumnDataRowCollection>(schemata->GetRows());
+	for (idx_t row_idx = 0; row_idx < row_collection->size(); row_idx++) {
+		RpcSchemaInfo info;
+		info.catalog_name = row_collection->GetValue(0, row_idx).GetValue<string>();
+		info.schema_name = row_collection->GetValue(1, row_idx).GetValue<string>();
+		// TODO this will fail if there are two schemas with the same name in different catalogs :/
+		schemas[info.schema_name] = make_uniq<RpcSchemaCatalogEntry>(*this, info);
+	}
 }
 
 RpcCatalog::~RpcCatalog() {
@@ -86,10 +94,6 @@ optional_ptr<SchemaCatalogEntry> RpcCatalog::LookupSchema(CatalogTransaction tra
                                                           const EntryLookupInfo &schema_lookup,
                                                           OnEntryNotFound if_not_found) {
 	auto schema_name = schema_lookup.GetEntryName();
-
-	// TODO should we just query this?
-	auto &rpc_transaction = RpcTransaction::Get(transaction.GetContext(), *this);
-
 	if (schemas.find(schema_name) == schemas.end()) {
 		switch (if_not_found) {
 		case OnEntryNotFound::THROW_EXCEPTION:
@@ -98,8 +102,7 @@ optional_ptr<SchemaCatalogEntry> RpcCatalog::LookupSchema(CatalogTransaction tra
 			return nullptr;
 		}
 	}
-
-	return reinterpret_cast<SchemaCatalogEntry *>(schemas[schema_name].get());
+	return schemas[schema_name].get();
 }
 
 const string &RpcCatalog::GetServerString() {
@@ -108,10 +111,14 @@ const string &RpcCatalog::GetServerString() {
 
 unique_ptr<ColumnDataCollection> RpcCatalog::ExecuteCommand(const string &query) {
 	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
-	auto response = client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query));
+	auto response =
+	    client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query, true));
 	chunk_collection->Initialize(response->Types());
-	auto fetch_response = client->MakeRequest<FetchResponseMessage>(make_uniq<FetchRequestMessage>(connection_id));
-	while (fetch_response->ResponseData() && fetch_response->ResponseData()->size() > 0) {
+	while (true) {
+		auto fetch_response = client->MakeRequest<FetchResponseMessage>(make_uniq<FetchRequestMessage>(connection_id));
+		if (!fetch_response || !fetch_response->ResponseData() || fetch_response->ResponseData()->size() == 0) {
+			break;
+		}
 		chunk_collection->Append(*fetch_response->ResponseData());
 	}
 	return chunk_collection;
@@ -127,8 +134,11 @@ const string &RpcCatalog::GetConnectionId() {
 
 optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction transaction,
                                                               const EntryLookupInfo &lookup_info) {
+	auto &schema_create_info = GetInfo()->Cast<RpcSchemaInfo>();
+
 	CreateTableInfo create_info(*this, lookup_info.GetEntryName());
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
+
 	auto bind_response =
 	    rpc_catalog.GetRawClient().MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
 	        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), true));

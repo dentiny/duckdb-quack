@@ -50,6 +50,7 @@ private:
 
 struct RpcSchemaInfo : CreateSchemaInfo {
 	string schema_name;
+	string catalog_name;
 };
 
 class RpcTableCatalogEntry : public TableCatalogEntry {
