@@ -7,7 +7,7 @@ require rpc
 statement ok
 call rpc_generate_keys();
 
-foreach server  '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:4243'
+foreach server  '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:1294'
 
 statement ok con1
 call rpc_start(${server});
@@ -55,6 +55,19 @@ from rpc_call(${server}, 'from fuu')
 statement ok con2
 from rpc_call(${server}, 'drop table fuu')
 
+
+# statement ok con2
+# from rpc_call(${server}, 'begin transaction')
+#
+# statement ok con2
+# from rpc_call(${server}, 'create table fuu2(i integer)')
+#
+# statement ok con2
+# from rpc_call(${server}, 'rollback')
+#
+# statement error
+# from rpc_call(${server}, 'from fuu')
+# ----
 
 # some error cases
 statement error con2

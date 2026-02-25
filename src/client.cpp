@@ -144,3 +144,11 @@ void WebSocketRpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 		throw IOException(e.what());
 	}
 }
+
+unique_ptr<RpcClient> RpcClient::GetClient(const string &uri) {
+	if (StringUtil::StartsWith(uri, "wss://")) {
+		return make_uniq<WebSocketRpcClient>(uri);
+	} else {
+		return make_uniq<UnixSocketRpcClient>(uri);
+	}
+}

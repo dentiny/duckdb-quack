@@ -83,6 +83,7 @@ public:
 	~WebSocketRpcServer() override;
 
 private:
+	void OnOpen(const websocketpp::connection_hdl &hdl);
 	void OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg);
 	static context_ptr OnTlsInit(WebSocketRpcServer *rpc_server, const websocketpp::connection_hdl &hdl);
 	static void WebsocketListenThread(WebSocketRpcServer *rpc_server);

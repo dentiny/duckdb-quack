@@ -91,6 +91,11 @@ RpcServer::RpcServer(ClientContext &context_p) : db(context_p.db) {
 }
 
 RpcServer::~RpcServer() {
+}
+
+// this cannot be in the generic destructor because it looks like the subclass-specific stuff gets destroyed before we
+// get there
+static void JoinListenThread(std::thread &listen_thread) {
 	try {
 		listen_thread.join();
 	} catch (std::exception &) {
@@ -99,12 +104,14 @@ RpcServer::~RpcServer() {
 
 WebSocketRpcServer::~WebSocketRpcServer() {
 	websocket_server.stop();
+	JoinListenThread(listen_thread);
 }
 
 UnixSocketRpcServer::~UnixSocketRpcServer() {
 	// this should interrupt accept() in the listen thread
 	close(unix_socket_server_fd);
 	unix_socket_keep_listening = false;
+	JoinListenThread(listen_thread);
 }
 
 void WebSocketRpcServer::WebsocketListenThread(WebSocketRpcServer *rpc_server) {
@@ -185,12 +192,14 @@ void WebSocketRpcServer::Listen(const string &listen_string_p) {
 	if (listen_string_p.empty()) {
 		throw InvalidInputException("Empty listen string specified");
 	}
-	D_ASSERT(StringUtil::StartsWith(listen_string_p, "wss:"));
+	D_ASSERT(StringUtil::StartsWith(listen_string_p, "wss://"));
 	listen_string = listen_string_p;
 	{
 		websocket_server.set_access_channels(websocketpp::log::alevel::none);
 		websocket_server.set_tls_init_handler(bind(&WebSocketRpcServer::OnTlsInit, this, ::_1));
 		websocket_server.set_message_handler(bind(&WebSocketRpcServer::OnMessage, this, ::_1, ::_2));
+		websocket_server.set_open_handler(bind(&WebSocketRpcServer::OnOpen, this, ::_1));
+
 		websocket_server.init_asio();
 
 		// TODO this is overly simplistic but fine for now
@@ -240,15 +249,17 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 
 		// for some reason the profiler is only alive here
 		auto &profiler = QueryProfiler::Get(*rpc_connection->duckdb_connection->context);
-		D_ASSERT(profiler.GetRoot() && profiler.GetRoot()->children.size() == 1);
-		auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
 		auto estimated_cardinality = optional_idx::Invalid();
 
-		// this should always be true, see above
-		D_ASSERT(profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO));
-		auto extra_info_map = profiler_info.GetMetricValue<InsertionOrderPreservingMap<string>>(MetricType::EXTRA_INFO);
-		if (extra_info_map.find(RenderTreeNode::ESTIMATED_CARDINALITY) != extra_info_map.end()) {
-			estimated_cardinality = atoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY].c_str());
+		if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1) {
+			auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
+			// this should always be true, see above
+			D_ASSERT(profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO));
+			auto extra_info_map =
+			    profiler_info.GetMetricValue<InsertionOrderPreservingMap<string>>(MetricType::EXTRA_INFO);
+			if (extra_info_map.find(RenderTreeNode::ESTIMATED_CARDINALITY) != extra_info_map.end()) {
+				estimated_cardinality = atoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY].c_str());
+			}
 		}
 
 		rpc_connection->duckdb_query_result = std::move(query_result);
@@ -300,4 +311,8 @@ void WebSocketRpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const
 		std::cout << "sending reply failed because: "
 		          << "(" << e.what() << ")" << std::endl;
 	}
+}
+
+void WebSocketRpcServer::OnOpen(const websocketpp::connection_hdl &hdl) {
+	// hdl.
 }

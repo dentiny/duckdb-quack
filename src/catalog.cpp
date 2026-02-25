@@ -1,6 +1,11 @@
 #include "catalog.hpp"
 
+#include "rpc_scan_function.hpp"
+#include "rpc_bind_data.hpp"
+
 #include "duckdb/common/exception.hpp"
+#include "duckdb/parser/parsed_data/create_schema_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/storage/database_size.hpp"
 
 // FIXME bunch of stuff copied from postgres scanner, can probably be simplified!
@@ -12,40 +17,16 @@ RpcTransaction::RpcTransaction(RpcCatalog &rpc_catalog_p, TransactionManager &ma
 }
 
 void RpcTransaction::Start() {
-	transaction_state = RpcTransactionState::TRANSACTION_NOT_YET_STARTED;
+	rpc_catalog.ExecuteCommand("BEGIN TRANSACTION");
 }
 
 void RpcTransaction::Commit() {
-	throw NotImplementedException("Commit not implemented yet");
-
-	// if (transaction_state == RpcTransactionState::TRANSACTION_STARTED) {
-	// 	transaction_state = RpcTransactionState::TRANSACTION_FINISHED;
-	// 	GetConnectionRaw().Execute(context, "COMMIT");
-	// }
+	rpc_catalog.ExecuteCommand("COMMIT");
 }
 
 void RpcTransaction::Rollback() {
-	throw NotImplementedException("Rollback not implemented yet");
-	//
-	// if (transaction_state == RpcTransactionState::TRANSACTION_STARTED) {
-	// 	transaction_state = RpcTransactionState::TRANSACTION_FINISHED;
-	// 	GetConnectionRaw().Execute(context, "ROLLBACK");
-	// }
+	rpc_catalog.ExecuteCommand("ROLLBACK");
 }
-//
-// PostgresConnection &RpcTransaction::GetConnection() {
-// 	auto &con = GetConnectionRaw();
-// 	if (transaction_state == RpcTransactionState::TRANSACTION_NOT_YET_STARTED) {
-// 		transaction_state = RpcTransactionState::TRANSACTION_STARTED;
-// 		con.Execute(GetContext(), "BEGIN");
-// 	}
-// 	return con;
-// }
-//
-// PostgresConnection &RpcTransaction::GetConnectionRaw() {
-// 	return connection.GetConnection();
-// }
-//
 
 RpcTransaction &RpcTransaction::Get(ClientContext &context, Catalog &catalog) {
 	return Transaction::Get(context, catalog).Cast<RpcTransaction>();
@@ -89,34 +70,86 @@ void RpcTransactionManager::Checkpoint(ClientContext &context, bool force) {
 	// db.Execute(context, "CHECKPOINT");
 }
 
-RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const string &server_string) : Catalog(db_p) {
+RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const string &server_string_p)
+    : Catalog(db_p), server_string(server_string_p), client(RpcClient::GetClient(server_string)) {
+	auto connection_response = client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
+	connection_id = connection_response->ConnectionId();
+	// TODO populate schemas?
+	RpcSchemaInfo info;
+	info.schema_name = "main";
+	schemas[info.schema_name] = make_uniq<RpcSchemaCatalogEntry>(*this, info);
 }
+
 RpcCatalog::~RpcCatalog() {
 }
 
 void RpcCatalog::Initialize(bool load_builtin) {
 }
 
-optional_ptr<CatalogEntry> RpcCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
-	throw NotImplementedException("~RpcCatalog not implemented yet");
-}
-
-void RpcCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {
-	throw NotImplementedException("ScanSchemas not implemented yet");
-}
-
 optional_ptr<SchemaCatalogEntry> RpcCatalog::LookupSchema(CatalogTransaction transaction,
                                                           const EntryLookupInfo &schema_lookup,
                                                           OnEntryNotFound if_not_found) {
 	auto schema_name = schema_lookup.GetEntryName();
+
+	// TODO should we just query this?
 	auto &rpc_transaction = RpcTransaction::Get(transaction.GetContext(), *this);
-	// FIXME
-	// auto entry = schemas.GetEntry(transaction.GetContext(), rpc_transaction, schema_name);
-	optional_ptr<SchemaCatalogEntry> entry = nullptr;
-	if (!entry && if_not_found != OnEntryNotFound::RETURN_NULL) {
-		throw BinderException("Schema with name \"%s\" not found", schema_name);
+
+	if (schemas.find(schema_name) == schemas.end()) {
+		switch (if_not_found) {
+		case OnEntryNotFound::THROW_EXCEPTION:
+			throw BinderException("Schema with name \"%s\" not found", schema_name);
+		case OnEntryNotFound::RETURN_NULL:
+			return nullptr;
+		}
 	}
-	return reinterpret_cast<SchemaCatalogEntry *>(entry.get());
+
+	return reinterpret_cast<SchemaCatalogEntry *>(schemas[schema_name].get());
+}
+
+const string &RpcCatalog::GetServerString() {
+	return server_string;
+}
+
+void RpcCatalog::ExecuteCommand(const string &query) {
+	// TODO return something here
+	auto response = client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query));
+}
+
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction transaction,
+                                                              const EntryLookupInfo &lookup_info) {
+	CreateTableInfo create_info(*this, lookup_info.GetEntryName());
+	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
+	// TODO actually query this
+	create_info.columns.AddColumn(ColumnDefinition("id", LogicalType::INTEGER));
+	return new RpcTableCatalogEntry(catalog, *this, create_info);
+}
+
+TableFunction RpcTableCatalogEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data_p) {
+	auto bind_data = make_uniq<RpcBindData>();
+	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
+
+	bind_data->uri = rpc_catalog.GetServerString();
+	// TODO we should not make another one here?!
+	auto client = RpcClient::GetClient(rpc_catalog.GetServerString());
+
+	auto connection_request_response =
+	    client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
+	bind_data->connection_id = connection_request_response->ConnectionId();
+
+	auto bind_response = client->MakeRequest<PrepareResponseMessage>(
+	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, StringUtil::Format("FROM %s", name)));
+
+	// TODO this is very wonky
+	bind_data_p = std::move(bind_data);
+	return RpcScanFunction::GetFunction();
+}
+
+optional_ptr<CatalogEntry> RpcCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
+	throw NotImplementedException("CreateSchema not implemented yet");
+}
+
+void RpcCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {
+	throw NotImplementedException("ScanSchemas not implemented yet");
 }
 
 PhysicalOperator &RpcCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
@@ -155,4 +188,67 @@ string RpcCatalog::GetDBPath() {
 
 void RpcCatalog::DropSchema(ClientContext &context, DropInfo &info) {
 	throw NotImplementedException("DropSchema not implemented yet");
+}
+
+void RpcSchemaCatalogEntry::Scan(ClientContext &context, CatalogType type,
+                                 const std::function<void(CatalogEntry &)> &callback) {
+	throw NotImplementedException("Scan not implemented yet");
+}
+void RpcSchemaCatalogEntry::Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
+	throw NotImplementedException("Scan not implemented yet");
+}
+
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateIndex(CatalogTransaction transaction, CreateIndexInfo &info,
+                                                              TableCatalogEntry &table) {
+	throw NotImplementedException("CreateIndex not implemented yet");
+}
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateFunction(CatalogTransaction transaction,
+                                                                 CreateFunctionInfo &info) {
+	throw NotImplementedException("CreateFunction not implemented yet");
+}
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateTable(CatalogTransaction transaction,
+                                                              BoundCreateTableInfo &info) {
+	throw NotImplementedException("CreateTable not implemented yet");
+}
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {
+	throw NotImplementedException("CreateView not implemented yet");
+}
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateSequence(CatalogTransaction transaction,
+                                                                 CreateSequenceInfo &info) {
+	throw NotImplementedException("CreateSequence not implemented yet");
+}
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateTableFunction(CatalogTransaction transaction,
+                                                                      CreateTableFunctionInfo &info) {
+	throw NotImplementedException("CreateTableFunction not implemented yet");
+}
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateCopyFunction(CatalogTransaction transaction,
+                                                                     CreateCopyFunctionInfo &info) {
+	throw NotImplementedException("CreateCopyFunction not implemented yet");
+}
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreatePragmaFunction(CatalogTransaction transaction,
+                                                                       CreatePragmaFunctionInfo &info) {
+	throw NotImplementedException("CreatePragmaFunction not implemented yet");
+}
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateCollation(CatalogTransaction transaction,
+                                                                  CreateCollationInfo &info) {
+	throw NotImplementedException("CreateCollation not implemented yet");
+}
+
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateType(CatalogTransaction transaction, CreateTypeInfo &info) {
+	throw NotImplementedException("CreateType not implemented yet");
+}
+
+void RpcSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info) {
+	throw NotImplementedException("DropEntry not implemented yet");
+}
+void RpcSchemaCatalogEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
+	throw NotImplementedException("Alter not implemented yet, Alter!");
+}
+
+unique_ptr<BaseStatistics> RpcTableCatalogEntry::GetStatistics(ClientContext &context, column_t column_id) {
+	throw NotImplementedException("GetStatistics not implemented yet");
+}
+
+TableStorageInfo RpcTableCatalogEntry::GetStorageInfo(ClientContext &context) {
+	throw NotImplementedException("GetStorageInfo not implemented yet");
 }

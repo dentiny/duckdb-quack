@@ -22,6 +22,8 @@ public:
 		return unique_ptr<TARGET>(reinterpret_cast<TARGET *>(response_message));
 	}
 
+	static unique_ptr<RpcClient> GetClient(const string &uri);
+
 	virtual ~RpcClient() {};
 
 protected:

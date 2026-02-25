@@ -2,30 +2,9 @@
 #include "client.hpp"
 
 #include "duckdb/function/table_function.hpp"
+#include "rpc_bind_data.hpp"
 
 using namespace duckdb;
-
-static unique_ptr<RpcClient> GetClient(const string &uri) {
-	if (StringUtil::StartsWith(uri, "wss://")) {
-		return make_uniq<WebSocketRpcClient>(uri);
-	} else {
-		return make_uniq<UnixSocketRpcClient>(uri);
-	}
-}
-
-struct RpcBindData : FunctionData {
-	bool Equals(const FunctionData &other_p) const override {
-		throw NotImplementedException("Equals not implemented");
-	}
-
-	unique_ptr<FunctionData> Copy() const override {
-		throw NotImplementedException("Copy not implemented");
-	}
-	unique_ptr<RpcClient> client;
-	string connection_id;
-	string uri;
-	optional_idx estimated_cardinality;
-};
 
 static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBindInput &input,
                                         vector<LogicalType> &return_types, vector<string> &names) {
@@ -37,14 +16,14 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	auto query = input.inputs[1].GetValue<string>();
 	auto bind_data = make_uniq<RpcBindData>();
 	bind_data->uri = input.inputs[0].GetValue<string>();
-	bind_data->client = GetClient(bind_data->uri);
+	auto client = RpcClient::GetClient(bind_data->uri);
 
 	auto connection_request_response =
-	    bind_data->client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
+	    client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
-	auto bind_response = bind_data->client->MakeRequest<PrepareResponseMessage>(
-	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
+	auto bind_response =
+	    client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
 	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
 	return_types = bind_response->Types();
@@ -102,7 +81,7 @@ unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, Tabl
 		return nullptr;
 	}
 	auto local_state = make_uniq<RpcLocalState>();
-	local_state->client = GetClient(bind_data.uri);
+	local_state->client = RpcClient::GetClient(bind_data.uri);
 	// TODO re-use client from bind data for first conn
 
 	return local_state;

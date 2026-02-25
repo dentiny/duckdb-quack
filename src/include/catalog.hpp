@@ -1,6 +1,9 @@
 #pragma once
 
+#include "client.hpp"
 #include "duckdb/catalog/catalog.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/transaction/meta_transaction.hpp"
 #include "duckdb/transaction/transaction.hpp"
 #include "duckdb/transaction/transaction_manager.hpp"
@@ -8,8 +11,6 @@
 namespace duckdb {
 
 class RpcCatalog;
-
-enum class RpcTransactionState { TRANSACTION_NOT_YET_STARTED, TRANSACTION_STARTED, TRANSACTION_FINISHED };
 
 class RpcTransaction : public Transaction {
 public:
@@ -28,7 +29,6 @@ public:
 
 private:
 	RpcCatalog &rpc_catalog;
-	RpcTransactionState transaction_state;
 	case_insensitive_map_t<unique_ptr<CatalogEntry>> catalog_entries;
 };
 
@@ -46,6 +46,50 @@ private:
 	RpcCatalog &rpc_catalog;
 	mutex transaction_lock;
 	reference_map_t<Transaction, unique_ptr<RpcTransaction>> transactions;
+};
+
+struct RpcSchemaInfo : CreateSchemaInfo {
+	string schema_name;
+};
+
+class RpcTableCatalogEntry : public TableCatalogEntry {
+public:
+	RpcTableCatalogEntry(Catalog &catalog_p, SchemaCatalogEntry &schema_p, CreateTableInfo &info_p)
+	    : TableCatalogEntry(catalog_p, schema_p, info_p) {
+	}
+
+	unique_ptr<BaseStatistics> GetStatistics(ClientContext &context, column_t column_id) override;
+	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override;
+	TableStorageInfo GetStorageInfo(ClientContext &context) override;
+};
+
+class RpcSchemaCatalogEntry : public SchemaCatalogEntry {
+public:
+	RpcSchemaCatalogEntry(Catalog &catalog_p, CreateSchemaInfo &info_p) : SchemaCatalogEntry(catalog_p, info_p) {
+	}
+
+	void Scan(ClientContext &context, CatalogType type, const std::function<void(CatalogEntry &)> &callback) override;
+	void Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) override;
+
+	optional_ptr<CatalogEntry> CreateIndex(CatalogTransaction transaction, CreateIndexInfo &info,
+	                                       TableCatalogEntry &table) override;
+	optional_ptr<CatalogEntry> CreateFunction(CatalogTransaction transaction, CreateFunctionInfo &info) override;
+	optional_ptr<CatalogEntry> CreateTable(CatalogTransaction transaction, BoundCreateTableInfo &info) override;
+	optional_ptr<CatalogEntry> CreateView(CatalogTransaction transaction, CreateViewInfo &info) override;
+	optional_ptr<CatalogEntry> CreateSequence(CatalogTransaction transaction, CreateSequenceInfo &info) override;
+	optional_ptr<CatalogEntry> CreateTableFunction(CatalogTransaction transaction,
+	                                               CreateTableFunctionInfo &info) override;
+	optional_ptr<CatalogEntry> CreateCopyFunction(CatalogTransaction transaction,
+	                                              CreateCopyFunctionInfo &info) override;
+	optional_ptr<CatalogEntry> CreatePragmaFunction(CatalogTransaction transaction,
+	                                                CreatePragmaFunctionInfo &info) override;
+	optional_ptr<CatalogEntry> CreateCollation(CatalogTransaction transaction, CreateCollationInfo &info) override;
+
+	optional_ptr<CatalogEntry> CreateType(CatalogTransaction transaction, CreateTypeInfo &info) override;
+
+	optional_ptr<CatalogEntry> LookupEntry(CatalogTransaction transaction, const EntryLookupInfo &lookup_info) override;
+	void DropEntry(ClientContext &context, DropInfo &info) override;
+	void Alter(CatalogTransaction transaction, AlterInfo &info) override;
 };
 
 class RpcCatalog : public Catalog {
@@ -79,18 +123,18 @@ public:
 	                                            unique_ptr<LogicalOperator> plan) override;
 
 	DatabaseSize GetDatabaseSize(ClientContext &context) override;
-
-	//! Whether or not this is an in-memory SQLite database
 	bool InMemory() override;
 	string GetDBPath() override;
 
-	// //! Returns a reference to the in-memory database (if any)
-	// SQLiteDB *GetInMemoryDatabase();
-	// //! Release the in-memory database (if there is any)
-	// void ReleaseInMemoryDatabase();
+	void ExecuteCommand(const string &query);
+	const string &GetServerString();
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
+	string server_string;
+	unique_ptr<RpcClient> client;
+	string connection_id;
+	unordered_map<string, unique_ptr<RpcSchemaCatalogEntry>> schemas;
 };
 
 } // namespace duckdb

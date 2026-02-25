@@ -31,7 +31,18 @@ from rpc.fuu;
 statement ok con2
 detach rpc;
 
+statement error con2
+detach rpc;
+----
+database not found
+
 statement ok con1
 call rpc_stop(${server});
+
+statement error con2
+attach ${server} as rpc (TYPE rpc)
+----
+Connection refused
+
 
 endloop
