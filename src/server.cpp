@@ -243,14 +243,13 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 
 			vector<Value> params; // TODO allow parameters here?
 			auto query_result = statement->PendingQuery(params, true)->Execute();
-
 			if (query_result->HasError()) {
 				return make_uniq<ErrorMessage>(query_result->GetError());
 			}
+			rpc_connection->duckdb_query_result = std::move(query_result);
 
 			// for some reason the profiler is only alive here
 			auto &profiler = QueryProfiler::Get(*rpc_connection->duckdb_connection->context);
-
 			if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1) {
 				auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
 				// this should always be true, see above
@@ -261,8 +260,6 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 					estimated_cardinality = atoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY].c_str());
 				}
 			}
-
-			rpc_connection->duckdb_query_result = std::move(query_result);
 		}
 		return make_uniq<PrepareResponseMessage>(statement->GetTypes(), statement->GetNames(), estimated_cardinality);
 	}

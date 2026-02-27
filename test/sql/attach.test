@@ -60,6 +60,51 @@ schema "xxx" does not exist
 # ----
 # 42	43
 
+statement ok
+begin transaction
+
+statement ok
+create table rpc.fuu2(i integer);
+#
+# statement ok
+# insert into rpc.fuu2 values (42);
+
+statement ok
+from rpc.fuu2;
+
+statement ok
+commit
+
+statement ok
+from rpc.fuu2;
+
+
+# TODO temporary, lets get drop to work
+statement ok
+drop table rpc.fuu2;
+
+
+statement ok
+begin transaction
+
+statement ok
+create table rpc.fuu3(i integer);
+#
+# statement ok
+# insert into rpc.fuu2 values (42);
+
+statement ok
+from rpc.fuu3;
+
+statement ok
+rollback
+
+statement error
+from rpc.fuu3;
+----
+not exist
+
+
 statement ok con2
 detach rpc;
 

@@ -6,6 +6,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/drop_info.hpp"
+#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/storage/database_size.hpp"
 
 // FIXME bunch of stuff copied from postgres scanner, can probably be simplified!
@@ -139,13 +141,17 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction
 	CreateTableInfo create_info(*this, lookup_info.GetEntryName());
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
 
-	auto bind_response =
-	    rpc_catalog.GetRawClient().MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
-	        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), true));
-	for (idx_t i = 0; i < bind_response->Types().size(); i++) {
-		create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
+	try {
+		auto bind_response =
+		    rpc_catalog.GetRawClient().MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
+		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), true));
+		for (idx_t i = 0; i < bind_response->Types().size(); i++) {
+			create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
+		}
+		return new RpcTableCatalogEntry(catalog, *this, create_info);
+	} catch (IOException &ex) { // FIXME this should not be a catch on IOError
+		return nullptr;
 	}
-	return new RpcTableCatalogEntry(catalog, *this, create_info);
 }
 
 TableFunction RpcTableCatalogEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data_p) {
@@ -163,7 +169,7 @@ optional_ptr<CatalogEntry> RpcCatalog::CreateSchema(CatalogTransaction transacti
 
 void RpcCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {
 	for (auto &schema : schemas) {
-		//callback(*schema.second);
+		// callback(*schema.second);
 	}
 }
 
@@ -207,10 +213,10 @@ void RpcCatalog::DropSchema(ClientContext &context, DropInfo &info) {
 
 void RpcSchemaCatalogEntry::Scan(ClientContext &context, CatalogType type,
                                  const std::function<void(CatalogEntry &)> &callback) {
-	throw NotImplementedException("Scan not implemented yet");
+	// TODO
 }
 void RpcSchemaCatalogEntry::Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
-	throw NotImplementedException("Scan not implemented yet");
+	// TODO
 }
 
 optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateIndex(CatalogTransaction transaction, CreateIndexInfo &info,
@@ -221,10 +227,27 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateFunction(CatalogTransact
                                                                  CreateFunctionInfo &info) {
 	throw NotImplementedException("CreateFunction not implemented yet");
 }
+
 optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateTable(CatalogTransaction transaction,
                                                               BoundCreateTableInfo &info) {
-	throw NotImplementedException("CreateTable not implemented yet");
+	auto &base_info = info.Base();
+	auto table_name = base_info.table;
+	if (base_info.on_conflict == OnCreateConflict::REPLACE_ON_CONFLICT) {
+		D_ASSERT(false);
+		// // CREATE OR REPLACE - drop any existing entries first (if any)
+		// TryDropEntry(transaction.GetContext(), CatalogType::TABLE_ENTRY, table_name);
+	}
+	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
+
+	// TODO eeeh make this sql creation less gunky
+	auto create_sql = StringUtil::Format("CREATE TABLE %s %s", info.Base().table,
+	                                     TableCatalogEntry::ColumnsToSQL(info.Base().columns, info.Base().constraints));
+	;
+	rpc_catalog.ExecuteCommand(create_sql); // yolo
+
+	return make_uniq_base<CatalogEntry, RpcTableCatalogEntry>(catalog, *this, info.Base());
 }
+
 optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {
 	throw NotImplementedException("CreateView not implemented yet");
 }
@@ -254,7 +277,9 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateType(CatalogTransaction 
 }
 
 void RpcSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info) {
-	throw NotImplementedException("DropEntry not implemented yet");
+	// TODO this is way oversimplified
+	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
+	rpc_catalog.ExecuteCommand(StringUtil::Format("DROP TABLE %s", info.name));
 }
 void RpcSchemaCatalogEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	throw NotImplementedException("Alter not implemented yet, Alter!");

@@ -55,7 +55,7 @@ from rpc_call(${server}, 'from fuu')
 statement ok con2
 from rpc_call(${server}, 'drop table fuu')
 
-
+# TODO how do we do multi-transaction RPC?
 # statement ok con2
 # from rpc_call(${server}, 'begin transaction')
 #
