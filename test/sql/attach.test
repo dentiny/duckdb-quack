@@ -37,7 +37,7 @@ from rpc.fuu;
 42	43
 
 query I
-from rpc.query('select 42');
+from rpc.call('select 42');
 ----
 42
 
