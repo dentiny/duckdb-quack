@@ -11,6 +11,7 @@
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/storage/database_size.hpp"
+#include "duckdb/catalog/catalog_entry/table_macro_catalog_entry.hpp"
 
 // FIXME bunch of stuff copied from postgres scanner, can probably be simplified!
 
@@ -142,6 +143,15 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction
 
 	CreateTableInfo create_info(*this, lookup_info.GetEntryName());
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
+
+	auto catalog_type = lookup_info.GetCatalogType();
+	auto &entry_name = lookup_info.GetEntryName();
+	if (catalog_type == CatalogType::TABLE_FUNCTION_ENTRY) {
+		auto entry = TryLoadBuiltInFunction(entry_name);
+		if (entry) {
+			return entry;
+		}
+	}
 
 	try {
 		auto bind_response =
@@ -294,4 +304,39 @@ unique_ptr<BaseStatistics> RpcTableCatalogEntry::GetStatistics(ClientContext &co
 
 TableStorageInfo RpcTableCatalogEntry::GetStorageInfo(ClientContext &context) {
 	throw NotImplementedException("GetStorageInfo not implemented yet");
+}
+
+// clang-format off
+static const DefaultTableMacro rpc_table_macros[] = {
+	{DEFAULT_SCHEMA, "query", {"remote_sql_query", nullptr}, {{nullptr, nullptr}},  "FROM rpc_call_by_name({CATALOG}, remote_sql_query)"},
+	{nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
+};
+// clang-format on
+
+// 'borrowed' from ducklake
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LoadBuiltInFunction(DefaultTableMacro macro) {
+	string macro_def = macro.macro;
+	macro_def = StringUtil::Replace(macro_def, "{CATALOG}", KeywordHelper::WriteQuoted(catalog.GetName(), '\''));
+	macro_def = StringUtil::Replace(macro_def, "{SCHEMA}", KeywordHelper::WriteQuoted(name, '\''));
+	macro.macro = macro_def.c_str();
+	auto info = DefaultTableFunctionGenerator::CreateTableMacroInfo(macro);
+	auto table_macro =
+	    make_uniq_base<CatalogEntry, TableMacroCatalogEntry>(catalog, *this, info->Cast<CreateMacroInfo>());
+	auto result = table_macro.get();
+	default_function_map.emplace(macro.name, std::move(table_macro));
+	return result;
+}
+
+optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::TryLoadBuiltInFunction(const string &entry_name) {
+	lock_guard<mutex> guard(default_function_lock);
+	auto entry = default_function_map.find(entry_name);
+	if (entry != default_function_map.end()) {
+		return entry->second.get();
+	}
+	for (idx_t index = 0; rpc_table_macros[index].name != nullptr; index++) {
+		if (StringUtil::CIEquals(rpc_table_macros[index].name, entry_name)) {
+			return LoadBuiltInFunction(rpc_table_macros[index]);
+		}
+	}
+	return nullptr;
 }

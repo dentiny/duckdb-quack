@@ -8,6 +8,8 @@
 #include "rpc_storage_extension.hpp"
 
 #include "duckdb/storage/storage_extension.hpp"
+#include "duckdb/catalog/default/default_table_functions.hpp"
+
 #include "catalog.hpp"
 
 namespace duckdb {
@@ -33,10 +35,13 @@ public:
 };
 
 static void LoadInternal(ExtensionLoader &loader) {
+	loader.SetDescription("Adds support for DuckDB Remote Procedure Calls (RPC)");
+
 	loader.RegisterFunction(RpcScanFunction::GetFunction());
+	loader.RegisterFunction(RpcScanByNameFunction::GetFunction());
+
 	loader.RegisterFunction(RpcStartFunction::GetFunction());
 	loader.RegisterFunction(RpcStopFunction::GetFunction());
-
 	loader.RegisterFunction(RpcGenerateKeysFunction::GetFunction());
 
 	// (ab)use storage extension info to store our state

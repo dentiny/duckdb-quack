@@ -7,6 +7,7 @@
 #include "duckdb/transaction/meta_transaction.hpp"
 #include "duckdb/transaction/transaction.hpp"
 #include "duckdb/transaction/transaction_manager.hpp"
+#include "duckdb/catalog/default/default_table_functions.hpp"
 
 namespace duckdb {
 
@@ -91,6 +92,14 @@ public:
 	optional_ptr<CatalogEntry> LookupEntry(CatalogTransaction transaction, const EntryLookupInfo &lookup_info) override;
 	void DropEntry(ClientContext &context, DropInfo &info) override;
 	void Alter(CatalogTransaction transaction, AlterInfo &info) override;
+
+private:
+	optional_ptr<CatalogEntry> TryLoadBuiltInFunction(const string &entry_name);
+	optional_ptr<CatalogEntry> LoadBuiltInFunction(DefaultTableMacro macro);
+
+private:
+	mutex default_function_lock;
+	case_insensitive_map_t<unique_ptr<CatalogEntry>> default_function_map;
 };
 
 class RpcCatalog : public Catalog {

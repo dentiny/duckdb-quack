@@ -55,20 +55,6 @@ from rpc_call(${server}, 'from fuu')
 statement ok con2
 from rpc_call(${server}, 'drop table fuu')
 
-# TODO how do we do multi-transaction RPC?
-# statement ok con2
-# from rpc_call(${server}, 'begin transaction')
-#
-# statement ok con2
-# from rpc_call(${server}, 'create table fuu2(i integer)')
-#
-# statement ok con2
-# from rpc_call(${server}, 'rollback')
-#
-# statement error
-# from rpc_call(${server}, 'from fuu')
-# ----
-
 # some error cases
 statement error con2
 from rpc_call(${server}, NULL)

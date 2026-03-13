@@ -357,8 +357,6 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(append_request_message.ConnectionId());
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 		auto &context = *rpc_connection->duckdb_connection->context;
-
-		// disable autocommit?
 		auto table_info = context.TableInfo(append_request_message.SchemaName(), append_request_message.TableName());
 		ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
 		collection.Append(append_request_message.AppendChunk());

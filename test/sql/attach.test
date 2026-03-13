@@ -37,6 +37,11 @@ from rpc.fuu;
 42	43
 
 query I
+from rpc.query('select 42');
+----
+42
+
+query I
 from rpc.main.fuu select col1 where col0=42 ;
 ----
 43

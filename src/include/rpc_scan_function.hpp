@@ -8,4 +8,9 @@ class RpcScanFunction {
 public:
 	static TableFunction GetFunction();
 };
+
+class RpcScanByNameFunction {
+public:
+	static TableFunction GetFunction();
+};
 } // namespace duckdb

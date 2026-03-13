@@ -1,5 +1,6 @@
 #include "rpc_scan_function.hpp"
 #include "client.hpp"
+#include "catalog.hpp"
 
 #include "duckdb/function/table_function.hpp"
 #include "rpc_bind_data.hpp"
@@ -23,6 +24,49 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
 	auto bind_response = client->MakeRequest<PrepareResponseMessage>(
+	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
+
+	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
+	return_types = bind_response->Types();
+	names = bind_response->Names();
+
+	return bind_data;
+}
+
+RpcCatalog &GetRpcCatalog(ClientContext &context, Value &catalog_name) {
+	if (catalog_name.IsNull()) {
+		throw BinderException("Catalog cannot be NULL");
+	}
+	// look up the database to query
+	auto db_name = catalog_name.GetValue<string>();
+	auto &db_manager = DatabaseManager::Get(context);
+	auto db = db_manager.GetDatabase(context, db_name);
+	if (!db) {
+		throw BinderException("Failed to find attached database \"%s\"", db_name);
+	}
+	auto &catalog = db->GetCatalog();
+	if (catalog.GetCatalogType() != "rpc") {
+		throw BinderException("Attached database \"%s\" does not refer to a RPC database", db_name);
+	}
+	return catalog.Cast<RpcCatalog>();
+}
+
+static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, TableFunctionBindInput &input,
+                                                   vector<LogicalType> &return_types, vector<string> &names) {
+	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
+		throw BinderException("catalog_name and query parameters cannot be NULL");
+	}
+
+	auto &rpc_catalog = GetRpcCatalog(context, input.inputs[0]);
+
+	// TODO some of this stuff below is duplicated af
+
+	auto query = input.inputs[1].GetValue<string>();
+	auto bind_data = make_uniq<RpcBindData>();
+	bind_data->uri = rpc_catalog.GetServerString();
+	bind_data->connection_id = rpc_catalog.GetConnectionId();
+
+	auto bind_response = rpc_catalog.GetRawClient().MakeRequest<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
 	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
@@ -109,4 +153,9 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 TableFunction RpcScanFunction::GetFunction() {
 	return TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
 	                     RpcInitLocal);
+}
+
+TableFunction RpcScanByNameFunction::GetFunction() {
+	return TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBindCatalogName,
+	                     RpcInitGlobal, RpcInitLocal);
 }
