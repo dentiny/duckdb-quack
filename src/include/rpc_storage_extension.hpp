@@ -1,7 +1,7 @@
 #pragma once
 
 #include "duckdb/storage/storage_extension.hpp"
-#include "server.hpp"
+#include "rpc_server.hpp"
 namespace duckdb {
 class DatabaseInstance;
 

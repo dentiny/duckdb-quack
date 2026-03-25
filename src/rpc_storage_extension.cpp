@@ -1,6 +1,6 @@
 #include "rpc_storage_extension.hpp"
 #include "duckdb/main/database.hpp"
-#include "server.hpp"
+#include "rpc_server.hpp"
 
 using namespace duckdb;
 
