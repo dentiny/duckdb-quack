@@ -10,7 +10,7 @@ print('method\tthreads\trows\tmedian_time_seconds')
 for duckdb_socket in ['/tmp/duckdb-rpc-socket', 'wss://localhost:1294']:
 	server = subprocess.Popen([duckdb_binary, '-init', '/dev/null', '-cmd', f"CALL rpc_start('{duckdb_socket}')",  '-readonly', '~/nobackup/tpch-sf100.db'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 	# wait for socket to actually be open
-	time.sleep(0.1)
+	time.sleep(1)
 	threads='default'
 	for rows in [int(math.pow(10,y)) for y in range(9)]:
 		timings = []

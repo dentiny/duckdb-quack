@@ -28,15 +28,15 @@ context_ptr WebSocketRpcServer::OnTlsInit(WebSocketRpcServer *rpc_server, const 
 WebSocketRpcServer::~WebSocketRpcServer() {
 	websocket_server.stop();
 	try {
-		listen_thread.join();
+		for (auto &thread : listen_threads) {
+			thread.join();
+		}
 	} catch (std::exception &) {
 	}
 }
 
 void WebSocketRpcServer::WebsocketListenThread(WebSocketRpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
-
-	rpc_server->websocket_server.start_accept();
 	rpc_server->websocket_server.run();
 }
 
@@ -107,32 +107,36 @@ void WebSocketRpcServer::Listen(const string &listen_string_p) {
 			throw InvalidInputException("Invalid port specified for websocket server (%d)", listen_port);
 		}
 		websocket_server.listen(listen_port);
+		websocket_server.start_accept();
 
-		listen_thread = std::thread(WebsocketListenThread, this);
+		// TODO this should eventually become its own config flag, but fow now the max threads is an okay proxy
+		idx_t thread_pool_size = DBConfig::GetConfig(*db).GetSystemMaxThreads(FileSystem::GetFileSystem(*db));
+
+		// Create a pool of threads to run all of the io_services.
+		for (idx_t i = 0; i < thread_pool_size; i++) {
+			listen_threads.push_back(std::thread(WebsocketListenThread, this));
+		}
 	}
 }
 
+// https://github.com/zaphoyd/websocketpp/issues/62#issuecomment-3786986
+// trick seems to be to have multiple threads run run()
 void WebSocketRpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg) {
 	auto &request_payload = msg.get()->get_payload();
-	auto read_stream = make_shared_ptr<MemoryStream>(request_payload.size());
-	read_stream->ReadData((data_ptr_t)request_payload.data(), request_payload.size());
+	MemoryStream read_stream((data_ptr_t)request_payload.data(), request_payload.size());
+	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
+	auto response_message = HandleMessage(*received_message);
 
-	std::thread message_worker_thread {[&]() {
-		auto received_message = ProtocolMessage::FromMemoryStream(*read_stream);
-		auto response_message = HandleMessage(*received_message);
-
-		MemoryStream write_stream;
-		response_message->ToMemoryStream(write_stream);
-		try {
-			websocket_server.send(hdl, write_stream.GetData(), write_stream.GetPosition(),
-			                      websocketpp::frame::opcode::binary);
-		} catch (websocketpp::exception const &e) {
-			// TODO we should not fail here but log something
-			std::cout << "sending reply failed because: "
-			          << "(" << e.what() << ")" << std::endl;
-		}
-	}};
-	message_worker_thread.detach();
+	MemoryStream write_stream;
+	response_message->ToMemoryStream(write_stream);
+	try {
+		websocket_server.send(hdl, write_stream.GetData(), write_stream.GetPosition(),
+		                      websocketpp::frame::opcode::binary);
+	} catch (websocketpp::exception const &e) {
+		// TODO we should not fail here but log something
+		std::cout << "sending reply failed because: "
+		          << "(" << e.what() << ")" << std::endl;
+	}
 }
 
 void WebSocketRpcServer::OnOpen(const websocketpp::connection_hdl &hdl) {

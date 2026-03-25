@@ -49,7 +49,8 @@ protected:
 
 protected:
 	string listen_string;
-	std::thread listen_thread;
+	std::vector<std::thread> listen_threads;
+
 	shared_ptr<DatabaseInstance> db;
 	mutex active_connections_mutex;
 	unordered_map<string, unique_ptr<RpcConnection>> active_connections;

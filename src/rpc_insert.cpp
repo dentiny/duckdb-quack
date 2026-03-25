@@ -72,8 +72,8 @@ SinkResultType RpcInsert::Sink(ExecutionContext &context, DataChunk &chunk, Oper
 	auto append_chunk = make_uniq<DataChunk>();
 	append_chunk->Initialize(context.client, chunk.GetTypes());
 	append_chunk->Reference(chunk);
-	auto append_message = make_uniq<AppendRequestMessage>(rpc_catalog.GetConnectionId(), tbl.schema.name,
-	                                                      tbl.name, std::move(append_chunk));
+	auto append_message = make_uniq<AppendRequestMessage>(rpc_catalog.GetConnectionId(), tbl.schema.name, tbl.name,
+	                                                      std::move(append_chunk));
 	rpc_catalog.GetRawClient().MakeRequest<AppendResponseMessage>(std::move(append_message));
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;

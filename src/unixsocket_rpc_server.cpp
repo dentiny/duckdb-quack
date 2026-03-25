@@ -14,7 +14,10 @@ UnixSocketRpcServer::~UnixSocketRpcServer() {
 	close(unix_socket_server_fd);
 	unix_socket_keep_listening = false;
 	try {
-		listen_thread.join();
+		// Wait for all threads in the pool to exit.
+		for (idx_t i = 0; i < listen_threads.size(); ++i) {
+			listen_threads[i].join();
+		}
 	} catch (std::exception &) {
 	}
 }
@@ -83,5 +86,5 @@ void UnixSocketRpcServer::Listen(const string &listen_string_p) {
 	}
 
 	unix_socket_keep_listening = true;
-	listen_thread = std::thread(UnixSocketListenThread, this);
+	listen_threads.push_back(std::thread(UnixSocketListenThread, this));
 }
