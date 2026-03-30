@@ -1,4 +1,7 @@
 #include "client.hpp"
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 using namespace duckdb;
 
@@ -47,107 +50,46 @@ void UnixSocketRpcClient::Send(unique_ptr<ProtocolMessage> message) {
 	message->ToSocket(unix_socket_fd, write_stream);
 }
 
-using websocketpp::lib::bind;
-using websocketpp::lib::placeholders::_1;
-using websocketpp::lib::placeholders::_2;
-
-static context_ptr on_tls_init_client(const char *, websocketpp::connection_hdl) {
-	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
-	try {
-		ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-		                 asio::ssl::context::no_sslv3 | asio::ssl::context::single_dh_use);
-		ctx->set_verify_mode(asio::ssl::verify_none);
-	} catch (std::exception &e) {
-		throw InternalException(e.what());
+template <class T>
+string GetUriPart(T ele) {
+	if (ele.afterLast - ele.first < 1) {
+		throw InvalidInputException("Invalid URI");
 	}
-	return ctx;
+	return string(ele.first, ele.afterLast - ele.first);
 }
 
-WebSocketRpcClient::WebSocketRpcClient(const string &uri_p) : RpcClient(uri_p) {
-	D_ASSERT(StringUtil::StartsWith(uri, "wss://"));
+HttpsRpcClient::HttpsRpcClient(const string &uri_p) : RpcClient(uri_p) {
+	D_ASSERT(StringUtil::StartsWith(uri, "https://") || StringUtil::StartsWith(uri, "http://"));
 
-	// some ugly setup
-	websocket_client.set_access_channels(websocketpp::log::alevel::none);
-	websocket_client.set_error_channels(websocketpp::log::alevel::none);
-	websocket_client.init_asio();
-	websocket_client.set_tls_init_handler(bind(&on_tls_init_client, "localhost", ::_1));
-	websocket_client.set_user_agent("DuckDB");
-	websocket_client.set_message_handler(bind(&WebSocketRpcClient::OnMessage, this, ::_1, ::_2));
-	websocket_client.set_fail_handler(bind(&WebSocketRpcClient::OnFail, this, ::_1));
-	websocket_client.set_open_handler(bind(&WebSocketRpcClient::OnOpen, this, ::_1));
+	https_client = make_uniq<duckdb_httplib_openssl::Client>(uri);
+	https_client->enable_server_certificate_verification(false);
+	https_client->enable_server_hostname_verification(false);
+	https_client->set_keep_alive(true);
+	https_client->set_follow_location(true);
+};
 
-	websocketpp::lib::error_code ec;
-	websocket_connection = websocket_client.get_connection(uri, ec);
-	if (ec) {
-		throw IOException(ec.message());
-	}
-	websocket_client.connect(websocket_connection);
-
-	// launch ze background thread to listen
-	websocket_listen_thread = std::thread([=]() { websocket_client.run(); });
+HttpsRpcClient::~HttpsRpcClient() {
+	https_client.reset();
 }
 
-WebSocketRpcClient::~WebSocketRpcClient() {
-	if (websocket_connection && websocket_exception.empty()) {
-		websocket_connection->close(websocketpp::close::status::normal, "");
-	}
-	websocket_listen_thread.join();
-}
-
-void WebSocketRpcClient::OnOpen(websocketpp::connection_hdl hdl_p) {
-	connection_open = true;
-}
-
-void WebSocketRpcClient::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr msg) {
-	auto &payload = msg->get_payload();
-	MemoryStream wss_read_stream((data_ptr_t)payload.data(), payload.size());
-	auto received_message = ProtocolMessage::FromMemoryStream(wss_read_stream);
-	std::unique_lock<std::mutex> lock(messages_mutex);
-	messages.push_front(std::move(received_message));
-	messages_wait.notify_one();
-}
-
-// boo
-void WebSocketRpcClient::OnFail(websocketpp::connection_hdl hdl) {
-	client::connection_ptr con = websocket_client.get_con_from_hdl(hdl);
-	// there is more error stuff to expose here if required
-	websocket_exception = StringUtil::Format("RPC request to %s failed: %s", uri, con->get_ec().message());
-}
-
-unique_ptr<ProtocolMessage> WebSocketRpcClient::Receive() {
-	if (!websocket_exception.empty()) {
-		throw IOException(websocket_exception);
-	}
-	unique_ptr<ProtocolMessage> result;
-	std::unique_lock<std::mutex> lock(messages_mutex);
-	messages_wait.wait(lock, [=] { return !messages.empty(); });
-	result = std::move(messages.back());
-	messages.pop_back();
-	return result;
-}
-
-void WebSocketRpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
+//  TODO we should probably combine those two into a Request method
+void HttpsRpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 	D_ASSERT(message_p);
-	try {
-		// we have to wait till the connection is actually open on connect
-		while (!connection_open && websocket_exception.empty()) {
-			usleep(10);
-		}
-
-		if (!websocket_exception.empty()) {
-			throw IOException(websocket_exception);
-		}
-		message_p->ToMemoryStream(write_stream);
-		websocket_client.send(websocket_connection, write_stream.GetData(), write_stream.GetPosition(),
-		                      websocketpp::frame::opcode::binary);
-	} catch (websocketpp::exception const &e) {
-		throw IOException(e.what());
+	message_p->ToMemoryStream(write_stream);
+	https_result = https_client->Post("/rpc", (const char *)write_stream.GetData(), write_stream.GetPosition(),
+	                                  "application/duckdb");
+	if (!https_result) {
+		throw IOException("Failed to send message %s ", to_string(https_result.error()));
 	}
+}
+unique_ptr<ProtocolMessage> HttpsRpcClient::Receive() {
+	MemoryStream non_owning_read_stream((data_ptr_t)https_result->body.data(), https_result->body.size());
+	return ProtocolMessage::FromMemoryStream(non_owning_read_stream);
 }
 
 unique_ptr<RpcClient> RpcClient::GetClient(const string &uri) {
-	if (StringUtil::StartsWith(uri, "wss://")) {
-		return make_uniq<WebSocketRpcClient>(uri);
+	if (StringUtil::StartsWith(uri, "https://") || StringUtil::StartsWith(uri, "http://")) {
+		return make_uniq<HttpsRpcClient>(uri);
 	} else {
 		return make_uniq<UnixSocketRpcClient>(uri);
 	}

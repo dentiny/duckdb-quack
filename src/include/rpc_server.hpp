@@ -9,11 +9,14 @@
 #include <thread>
 
 #include <sys/un.h>
+//
+// // TODO don't like those includes here...
+// #include "websocketpp/config/asio.hpp"
+// #include "websocketpp/config/asio_client.hpp"
+// #include "websocketpp/server.hpp"
 
-// TODO don't like those includes here...
-#include "websocketpp/config/asio.hpp"
-#include "websocketpp/config/asio_client.hpp"
-#include "websocketpp/server.hpp"
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+#include "httplib.hpp"
 
 namespace duckdb {
 
@@ -73,26 +76,18 @@ private:
 	bool unix_socket_keep_listening;
 };
 
-typedef websocketpp::server<websocketpp::config::asio_tls> server;
-typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
-typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
-
-class WebSocketRpcServer : public RpcServer {
+class HttpsRpcServer : public RpcServer {
 public:
-	WebSocketRpcServer(ClientContext &context_p) : RpcServer(context_p) {
+	HttpsRpcServer(ClientContext &context_p) : RpcServer(context_p) {
 	}
-
 	void Listen(const string &listen_string) override;
-	~WebSocketRpcServer() override;
+
+	~HttpsRpcServer() override;
 
 private:
-	void OnOpen(const websocketpp::connection_hdl &hdl);
-	void OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg);
-	static context_ptr OnTlsInit(WebSocketRpcServer *rpc_server, const websocketpp::connection_hdl &hdl);
-	static void WebsocketListenThread(WebSocketRpcServer *rpc_server);
+	static void ListenThread(HttpsRpcServer *rpc_server, const string &listen_host, int listen_port);
 
-	server websocket_server;
-	context_ptr ctx;
+	unique_ptr<duckdb_httplib_openssl::Server> server;
 };
 
 } // namespace duckdb

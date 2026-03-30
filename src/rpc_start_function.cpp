@@ -5,6 +5,9 @@
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/database.hpp"
 
+#include <unistd.h>
+#include <sys/stat.h>
+
 using namespace duckdb;
 
 struct RpcStartStopFunctionData : public TableFunctionData {
@@ -98,17 +101,17 @@ static void RpcGenerateKeysFun(ClientContext &context, TableFunctionInput &data_
 
 	output.SetCardinality(1);
 	bind_data.finished = true;
-	if (fs.FileExists(server_key_file) && fs.FileExists(private_key_file) && fs.FileExists(dh_param_file)) {
+	if (fs.FileExists(server_key_file) || fs.FileExists(private_key_file) || fs.FileExists(dh_param_file)) {
 		output.data[0].SetValue(
-		    0, StringUtil::Format("Key files exist in %s - remove to recreate them", certificate_directory));
+		    0, StringUtil::Format("Key file(s) exist in %s - remove to recreate them", certificate_directory));
 		return;
 	}
 	SslKeyGenerator::GenerateSslKeys(server_key_file, private_key_file, dh_param_file, 3650);
-	if (chmod(server_key_file.c_str(), S_IRUSR) || chmod(private_key_file.c_str(), S_IRUSR) ||
-	    chmod(dh_param_file.c_str(), S_IRUSR)) {
+	if (chmod(server_key_file.c_str(), S_IRUSR) || chmod(private_key_file.c_str(), S_IRUSR) /*||
+	    chmod(dh_param_file.c_str(), S_IRUSR)*/) {
 		unlink(server_key_file.c_str());
 		unlink(private_key_file.c_str());
-		unlink(dh_param_file.c_str());
+		//	unlink(dh_param_file.c_str());
 		throw IOException("Error setting permissions on key files");
 	}
 

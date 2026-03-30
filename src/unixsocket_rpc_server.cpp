@@ -7,6 +7,11 @@
 #include "duckdb/common/render_tree.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
 
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/stat.h>
+
 using namespace duckdb;
 
 UnixSocketRpcServer::~UnixSocketRpcServer() {

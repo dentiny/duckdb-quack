@@ -7,16 +7,17 @@ import statistics
 duckdb_binary = './build/release/duckdb'
 print('method\tthreads\trows\tmedian_time_seconds')
 
-for duckdb_socket in ['/tmp/duckdb-rpc-socket', 'wss://localhost:1294']:
+for duckdb_socket in ['https://localhost:8080', 'http://localhost:8081', '/tmp/duckdb-rpc-socket']:
 	server = subprocess.Popen([duckdb_binary, '-init', '/dev/null', '-cmd', f"CALL rpc_start('{duckdb_socket}')",  '-readonly', '~/nobackup/tpch-sf100.db'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 	# wait for socket to actually be open
 	time.sleep(1)
 	threads='default'
 	for rows in [int(math.pow(10,y)) for y in range(9)]:
+	#for rows in [60000000]:
 		timings = []
 		for rep in range(3):
 			start = time.time()
-			client = subprocess.run([duckdb_binary,  '-init', '/dev/null',  '-c', f"EXPLAIN ANALYZE FROM rpc_call('{duckdb_socket}','FROM lineitem LIMIT {rows}');"], stdout=subprocess.PIPE)
+			client = subprocess.run([duckdb_binary,  '-init', '/dev/null',  '-c', f"SET enable_progress_bar = false; EXPLAIN ANALYZE FROM rpc_call('{duckdb_socket}','FROM lineitem LIMIT {rows}');"], stdout=subprocess.PIPE)
 			timings.append(time.time() - start)
 		median_time = round(statistics.median(timings), 3)
 		print(f'{duckdb_socket}\t{threads}\t{rows}\t{median_time}')

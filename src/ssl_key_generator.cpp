@@ -100,7 +100,7 @@ void SslKeyGenerator::GenerateSslKeys(const std::string &cert_filename, const st
 		}
 	}
 
-	{
+	if (false) { // TODO this seems to be not needed atm
 		// create dh parameters
 		std::unique_ptr<EVP_PKEY_CTX, void (*)(EVP_PKEY_CTX *)> dh_ctx {create_context(EVP_PKEY_DH), EVP_PKEY_CTX_free};
 

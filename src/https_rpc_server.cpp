@@ -1,0 +1,90 @@
+#include "rpc_server.hpp"
+#include "message.hpp"
+#include "ssl_key_generator.hpp"
+
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/connection.hpp"
+#include "duckdb/common/render_tree.hpp"
+#include "duckdb/common/serializer/memory_stream.hpp"
+
+#include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/statement/create_statement.hpp"
+#include "duckdb/planner/binder.hpp"
+
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+#include "httplib.hpp"
+
+using namespace duckdb;
+
+HttpsRpcServer::~HttpsRpcServer() {
+	server->stop();
+	try {
+		for (auto &thread : listen_threads) {
+			thread.join();
+		}
+	} catch (std::exception &) {
+	}
+}
+
+void HttpsRpcServer::ListenThread(HttpsRpcServer *rpc_server, const string &listen_host, int listen_port) {
+	D_ASSERT(rpc_server);
+	D_ASSERT(rpc_server->server);
+	D_ASSERT(listen_port > 1 && listen_port < 65535);
+	D_ASSERT(listen_host == "localhost"); // FIXME
+	rpc_server->server->listen(listen_host, listen_port);
+}
+
+template <class T>
+string GetUriPart(T ele) {
+	if (ele.afterLast - ele.first < 1) {
+		throw InvalidInputException("Invalid URI");
+	}
+	return string(ele.first, ele.afterLast - ele.first);
+}
+
+void HttpsRpcServer::Listen(const string &listen_string_p) {
+	if (listen_string_p.empty()) {
+		throw InvalidInputException("Empty listen string specified");
+	}
+	// we construct this client solely to parse the host/port url
+	duckdb_httplib_openssl::Client dummy_client(listen_string_p);
+	bool use_https = dummy_client.ssl_context() != nullptr;
+
+	listen_string = listen_string_p;
+
+	if (use_https) {
+		auto &fs = FileSystem::GetFileSystem(*db);
+		// TODO make this configurable
+		auto certificate_directory = SslKeyGenerator::GetDefaultCertificateDirectory(fs);
+		auto server_key_file = fs.JoinPath(certificate_directory, "server.pem");
+		auto private_key_file = fs.JoinPath(certificate_directory, "private_key.pem");
+		// auto dh_param_file = fs.JoinPath(certificate_directory, "dh.pem");
+		// TODO check if those files are there
+		server = make_uniq<duckdb_httplib_openssl::SSLServer>(server_key_file.c_str(), private_key_file.c_str());
+	} else {
+		server = make_uniq<duckdb_httplib_openssl::Server>();
+	}
+	if (!server->is_valid()) {
+		throw InternalException("Failed to instantiate HTTP(S) server");
+	}
+	// TODO make this configurable?
+	server->new_task_queue = [] {
+		return new duckdb_httplib_openssl::ThreadPool(/*base_threads=*/8, /*max_threads=*/64);
+	};
+
+	server->Get("/", [=](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res) {
+		res.set_content("This is a DuckDB RPC Endpoint. Use ATTACH to connect here.\n", "text/plain");
+	});
+	server->Post("/rpc", [&](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res,
+	                         const duckdb_httplib_openssl::ContentReader &content_reader) {
+		MemoryStream stream;
+		content_reader([&](const char *data, size_t data_length) {
+			stream.WriteData((data_ptr_t)data, data_length);
+			return true;
+		});
+		HandleMessage(*ProtocolMessage::FromMemoryStream(stream))->ToMemoryStream(stream);
+		res.set_content((const char *)stream.GetData(), stream.GetPosition(), "application/duckdb");
+	});
+
+	listen_threads.push_back(std::thread(ListenThread, this, dummy_client.host(), dummy_client.port()));
+}

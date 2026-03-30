@@ -1,11 +1,8 @@
 #pragma once
 
 #include "message.hpp"
-
-#define ASIO_STANDALONE // no boost!
-
-#include "websocketpp/client.hpp"
-#include "websocketpp/config/asio_client.hpp"
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+#include "httplib.hpp"
 
 namespace duckdb {
 
@@ -51,34 +48,18 @@ private:
 	int unix_socket_fd;
 };
 
-// TODO move this to a separate header
-typedef websocketpp::connection_hdl connection_ptr;
-typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
-typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
-typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
-
-class WebSocketRpcClient : public RpcClient {
+class HttpsRpcClient : public RpcClient {
 public:
-	WebSocketRpcClient(const string &uri_p);
-	~WebSocketRpcClient() override;
+	HttpsRpcClient(const string &uri_p);
+	~HttpsRpcClient() override;
 
 private:
 	void Send(unique_ptr<ProtocolMessage> message_p) override;
 	unique_ptr<ProtocolMessage> Receive() override;
-	void OnOpen(connection_ptr hdl);
-	void OnMessage(const connection_ptr &hdl, message_ptr msg);
-	void OnFail(connection_ptr hdl);
 
 private:
-	std::thread websocket_listen_thread;
-	unique_ptr<ProtocolMessage> message;
-	deque<unique_ptr<ProtocolMessage>> messages;
-	std::mutex messages_mutex;
-	std::condition_variable messages_wait;
-	client websocket_client;
-	client::connection_ptr websocket_connection;
-	bool connection_open = false;
-	std::string websocket_exception;
+	unique_ptr<duckdb_httplib_openssl::Client> https_client;
+	duckdb_httplib_openssl::Result https_result;
 };
 
 } // namespace duckdb
