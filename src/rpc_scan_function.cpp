@@ -4,6 +4,8 @@
 
 #include "duckdb/function/table_function.hpp"
 #include "rpc_bind_data.hpp"
+#include "duckdb/main/database.hpp"
+#include "duckdb/main/secret/secret_manager.hpp"
 
 using namespace duckdb;
 
@@ -19,8 +21,17 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	bind_data->uri = input.inputs[0].GetValue<string>();
 	bind_data->initial_client = RpcClient::GetClient(bind_data->uri);
 
+	Value default_token_val;
+	auto &config = DBConfig::GetConfig(context);
+
+	auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+	D_ASSERT(lookup_result_token);
+	if (default_token_val.IsNull() || default_token_val.type().id() != LogicalTypeId::VARCHAR) {
+		throw InvalidConfigurationException("No RPC token found");
+	}
+
 	auto connection_request_response = bind_data->initial_client->MakeRequest<ConnectionResponseMessage>(
-	    make_uniq<ConnectionRequestMessage>("mellon"));
+	    make_uniq<ConnectionRequestMessage>(default_token_val.GetValue<string>()));
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
 	auto bind_response = bind_data->initial_client->MakeRequest<PrepareResponseMessage>(

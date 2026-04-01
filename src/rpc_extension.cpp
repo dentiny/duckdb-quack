@@ -8,7 +8,6 @@
 #include "rpc_storage_extension.hpp"
 
 #include "duckdb/storage/storage_extension.hpp"
-#include "duckdb/catalog/default/default_table_functions.hpp"
 
 #include "catalog.hpp"
 
@@ -35,7 +34,7 @@ public:
 };
 
 // pass session id
-static void RpcAuthToken(DataChunk &args, ExpressionState &state, Vector &result) {
+static void RpcAuthToken(const DataChunk &args, ExpressionState &state, Vector &result) {
 	D_ASSERT(args.size() == 2);
 	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
 	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
@@ -55,7 +54,7 @@ static void RpcAuthToken(DataChunk &args, ExpressionState &state, Vector &result
 }
 
 // pass session id
-static void RpcDummyAuthorization(DataChunk &args, ExpressionState &, Vector &result) {
+static void RpcDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
 	D_ASSERT(args.size() == 2);
 	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
 	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
@@ -97,7 +96,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("rpc_authorization_function", "Name of a callback function for authorization",
 	                          LogicalType::VARCHAR, Value("rpc_dummy_authorization"));
 
-	// TODO make this readonly from sql?
+	// TODO make this readonly from SQL?
 	config.AddExtensionOption("rpc_default_token", "Authorization token used by default", LogicalType::VARCHAR, Value(),
 	                          nullptr, SetScope::GLOBAL);
 }

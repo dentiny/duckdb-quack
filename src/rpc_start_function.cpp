@@ -15,6 +15,7 @@ struct RpcStartStopFunctionData : public TableFunctionData {
 	}
 
 	bool finished = false;
+	bool auth_is_default = false;
 	string listen_string;
 };
 
@@ -27,10 +28,18 @@ static unique_ptr<FunctionData> RpcStartStopBind(ClientContext &context, TableFu
 	}
 	result->listen_string = input.inputs[0].GetValue<string>();
 	return_types.emplace_back(LogicalType::VARCHAR);
-	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("listen_address");
-	// TODO only add this if auth points to the default function
-	names.emplace_back("default_token");
+
+	auto &config = DBConfig::GetConfig(context);
+	Value default_auth_val;
+	auto lookup_result_token = config.TryGetCurrentSetting("rpc_authentication_function", default_auth_val);
+	result->auth_is_default =
+	    lookup_result_token && !default_auth_val.IsNull() && default_auth_val.GetValue<string>() == "rpc_auth_token";
+
+	if (result->auth_is_default) {
+		return_types.emplace_back(LogicalType::VARCHAR);
+		names.emplace_back("auth_token");
+	}
 
 	return std::move(result);
 }
@@ -41,23 +50,30 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 		return;
 	}
 
-	// generate default token if not set
-	// TODO only do this if we are using default auth
-	auto &config = DBConfig::GetConfig(context);
-	Value default_token_val;
-	auto lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-	D_ASSERT(lookup_result);
-	if (default_token_val.IsNull()) {
-		config.SetOptionByName("rpc_default_token", Value(RpcServer::GenerateSessionId()));
-	}
-	lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-	D_ASSERT(lookup_result);
-	D_ASSERT(!default_token_val.IsNull());
-	D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
-
 	RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_string);
-	output.data[0].SetValue(0, bind_data.listen_string);
-	output.data[1].SetValue(0, default_token_val.GetValue<string>());
+	output.SetValue(0, 0, bind_data.listen_string);
+
+	// generate default token if not set
+	if (bind_data.auth_is_default) {
+		Value default_token_val;
+		auto &config = DBConfig::GetConfig(context);
+
+		// TODO there could be a race condition here, lock this
+		auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+		D_ASSERT(lookup_result_token);
+
+		if (default_token_val.IsNull()) {
+			config.SetOptionByName("rpc_default_token", Value(RpcServer::GenerateSessionId()));
+		}
+
+		lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+		D_ASSERT(lookup_result_token);
+		D_ASSERT(!default_token_val.IsNull());
+		D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
+		output.data[1].SetValue(0, default_token_val.GetValue<string>());
+		output.SetValue(1, 0, default_token_val.GetValue<string>());
+	}
+
 	output.SetCardinality(1);
 	bind_data.finished = true;
 }
