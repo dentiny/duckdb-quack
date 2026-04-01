@@ -73,8 +73,16 @@ void RpcTransactionManager::Checkpoint(ClientContext &context, bool force) {
 
 RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const string &server_string_p)
     : Catalog(db_p), server_string(server_string_p), client(RpcClient::GetClient(server_string)) {
-	auto connection_response =
-	    client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>("mellon"));
+	// evil copy paste
+	Value default_token_val;
+	auto &config = DBConfig::GetConfig(db_p.GetDatabase());
+
+	// TODO there could be a race condition here, lock this
+	auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+	D_ASSERT(lookup_result_token);
+
+	auto connection_response = client->MakeRequest<ConnectionResponseMessage>(
+	    make_uniq<ConnectionRequestMessage>(default_token_val.GetValue<string>()));
 	connection_id = connection_response->ConnectionId();
 
 	// TODO a tiiny bit clunky this
