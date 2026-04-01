@@ -27,7 +27,11 @@ static unique_ptr<FunctionData> RpcStartStopBind(ClientContext &context, TableFu
 	}
 	result->listen_string = input.inputs[0].GetValue<string>();
 	return_types.emplace_back(LogicalType::VARCHAR);
-	names.emplace_back("Status");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("listen_address");
+	// TODO only add this if auth points to the default function
+	names.emplace_back("default_token");
+
 	return std::move(result);
 }
 
@@ -36,9 +40,24 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 	if (bind_data.finished) {
 		return;
 	}
-	auto &rpc_state = RpcStorageExtensionInfo::GetState(*context.db);
-	rpc_state.FindOrCreateServer(context, bind_data.listen_string);
-	output.data[0].SetValue(0, StringUtil::Format("Listening on %s", bind_data.listen_string));
+
+	// generate default token if not set
+	// TODO only do this if we are using default auth
+	auto &config = DBConfig::GetConfig(context);
+	Value default_token_val;
+	auto lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+	D_ASSERT(lookup_result);
+	if (default_token_val.IsNull()) {
+		config.SetOptionByName("rpc_default_token", Value(RpcServer::GenerateSessionId()));
+	}
+	lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+	D_ASSERT(lookup_result);
+	D_ASSERT(!default_token_val.IsNull());
+	D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
+
+	RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_string);
+	output.data[0].SetValue(0, bind_data.listen_string);
+	output.data[1].SetValue(0, default_token_val.GetValue<string>());
 	output.SetCardinality(1);
 	bind_data.finished = true;
 }

@@ -45,6 +45,8 @@ public:
 	string CreateNewConnection(const string &session_id);
 	// TODO need something to destroy connections
 
+	static string GenerateSessionId();
+
 	virtual ~RpcServer();
 
 protected:

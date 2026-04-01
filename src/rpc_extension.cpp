@@ -35,14 +35,23 @@ public:
 };
 
 // pass session id
-static void RpcAuthToken(DataChunk &args, ExpressionState &, Vector &result) {
+static void RpcAuthToken(DataChunk &args, ExpressionState &state, Vector &result) {
 	D_ASSERT(args.size() == 2);
 	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
 	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
 	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
 
 	auto auth_str = args.GetValue(1, 0).GetValue<string>();
-	result.SetValue(0, Value(auth_str == "mellon")); // speak 'friend' and enter
+
+	Value default_token_val;
+	auto &config = DBConfig::GetConfig(state.GetContext());
+	auto lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+	D_ASSERT(lookup_result);
+	D_ASSERT(!default_token_val.IsNull());
+	D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
+	auto default_token = default_token_val.GetValue<string>();
+
+	result.SetValue(0, Value(auth_str == default_token));
 }
 
 // pass session id
@@ -87,6 +96,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          LogicalType::VARCHAR, Value("rpc_auth_token"));
 	config.AddExtensionOption("rpc_authorization_function", "Name of a callback function for authorization",
 	                          LogicalType::VARCHAR, Value("rpc_dummy_authorization"));
+
+	// TODO make this readonly from sql?
+	config.AddExtensionOption("rpc_default_token", "Authorization token used by default", LogicalType::VARCHAR, Value(),
+	                          nullptr, SetScope::GLOBAL);
 }
 
 void RpcExtension::Load(ExtensionLoader &loader) {

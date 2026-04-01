@@ -1,20 +1,17 @@
 #include "rpc_server.hpp"
 #include "message.hpp"
-#include "ssl_key_generator.hpp"
+#include "rpc_storage_extension.hpp"
 
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/common/render_tree.hpp"
-#include "duckdb/common/serializer/memory_stream.hpp"
-#include "duckdb/execution/expression_executor.hpp"
 
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
-#include "duckdb/parser/statement/create_statement.hpp"
-#include "duckdb/planner/binder.hpp"
 #include "duckdb/storage/temporary_file_manager.hpp"
 #include "duckdb/main/database.hpp"
-#include <openssl/rand.h>
+
 #include "duckdb/common/types/blob.hpp"
+#include <openssl/rand.h>
 
 using namespace duckdb;
 
@@ -89,19 +86,6 @@ static string GetSettingString(DatabaseInstance &db, const string &setting_name)
 	return setting_str;
 }
 
-static string CreateSessionId() {
-	string session_id_bytes;
-	session_id_bytes.resize(32);
-	// we force the use of the (safer) OpenSSL random generator here, the session ids should really not be
-	// predictable
-	if (!RAND_bytes((unsigned char *)session_id_bytes.data(), session_id_bytes.size())) {
-		throw InternalException("RAND_bytes failed");
-	}
-	auto session_id = Blob::ToBase64(session_id_bytes);
-	D_ASSERT(!session_id.empty());
-	return session_id;
-}
-
 template <typename... ARGS>
 static bool EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... values) {
 	Connection dummy_connection(db);
@@ -116,12 +100,25 @@ static bool EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... v
 	return true;
 }
 
+string RpcServer::GenerateSessionId() {
+	string session_id_bytes;
+	session_id_bytes.resize(32);
+	// we force the use of the (safer) OpenSSL random generator here, the session ids should really not be
+	// predictable
+	if (!RAND_bytes((unsigned char *)session_id_bytes.data(), session_id_bytes.size())) {
+		throw InternalException("RAND_bytes failed");
+	}
+	auto session_id = Blob::ToBase64(session_id_bytes);
+	D_ASSERT(!session_id.empty());
+	return session_id;
+}
+
 // main switcheroo happens here
 unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_message) {
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
-		string session_id = CreateSessionId();
+		string session_id = RpcServer::GenerateSessionId();
 		if (!EvaluateAuthQuery(
 		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authentication_function")),
 		        Value(session_id), Value(connection_request_message.AuthString()))) {

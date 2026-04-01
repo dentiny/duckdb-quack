@@ -12,6 +12,9 @@ call rpc_generate_keys();
 foreach server  '{TEST_DIR}/duckdb-rpc-socket' 'https://localhost:8080' 'http://localhost:8081'
 
 statement ok con1
+set rpc_default_token='mellon';
+
+statement ok con1
 call rpc_start({server});
 
 
