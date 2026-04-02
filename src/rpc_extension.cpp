@@ -17,7 +17,7 @@ namespace duckdb {
 static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
                                      AttachedDatabase &db, const string &name, AttachInfo &info,
                                      AttachOptions &attach_options) {
-	return make_uniq<RpcCatalog>(db, info.path);
+	return make_uniq<RpcCatalog>(db, "quack:" + info.path);
 }
 
 static unique_ptr<TransactionManager> RpcCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,

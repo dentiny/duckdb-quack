@@ -14,27 +14,20 @@ RpcStorageExtensionInfo &RpcStorageExtensionInfo::GetState(const DatabaseInstanc
 }
 
 RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, const std::string &listen_string) {
-	std::lock_guard<std::mutex> lock(servers_mutex);
+	std::lock_guard lock(servers_mutex);
 	auto it = servers.find(listen_string);
 	if (it != servers.end()) {
 		return *it->second;
 	}
 	unique_ptr<RpcServer> server;
-	if (!StringUtil::StartsWith(listen_string, "quack:")) {
-		throw InvalidInputException("Invalid listen string, needs to start with quack:");
-	}
-	//	if (StringUtil::StartsWith(listen_string, "https://") || StringUtil::StartsWith(listen_string, "http://")) {
 	server = make_uniq<HttpsRpcServer>(context);
-	// } else {
-	// 	server = make_uniq<UnixSocketRpcServer>(context);
-	// }
 	server->Listen(listen_string);
 	servers.emplace(listen_string, std::move(server));
 	return *servers[listen_string];
 }
 
 bool RpcStorageExtensionInfo::StopServer(ClientContext &context, const std::string &listen_string) {
-	std::lock_guard<std::mutex> lock(servers_mutex);
+	std::lock_guard lock(servers_mutex);
 	const auto it = servers.find(listen_string);
 	if (it == servers.end()) {
 		return false;

@@ -14,8 +14,8 @@ create table fuu as values(42, 43);
 statement ok
 create table moo.fuu2 as values(44, 45);
 
-# statement ok
-# call rpc_generate_keys();
+statement ok
+call rpc_generate_keys();
 
 foreach server 'quack:localhost'
 # 'wss://localhost:1294'
@@ -134,6 +134,6 @@ call rpc_stop({server});
 statement error con2
 attach {server} as rpc (TYPE rpc)
 ----
-Connection refused
+Failed to send message
 
 endloop
