@@ -247,8 +247,17 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 		return;
 	}
 
-	output.Reference(*fetch_response->ResponseData());
-	output.SetCardinality(fetch_response->ResponseData()->size());
+	auto &response_chunk = *fetch_response->ResponseData();
+	if (response_chunk.ColumnCount() == output.ColumnCount()) {
+		output.Reference(response_chunk);
+	} else {
+		// Server returned more columns than needed (e.g. rpc_call with projection pushdown).
+		// Copy only the columns DuckDB expects.
+		for (idx_t i = 0; i < output.ColumnCount(); i++) {
+			output.data[i].Reference(response_chunk.data[i]);
+		}
+	}
+	output.SetCardinality(response_chunk.size());
 }
 
 static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const FunctionData *bind_data_p) {
