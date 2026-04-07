@@ -72,6 +72,18 @@ select count(*) = 0 from duckdb_logs_parsed('RPC') where error is not null and s
 ----
 true
 
+# check client_query_id is populated on client-side logs
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where client_query_id is not null and server is not null
+----
+true
+
+# check client_query_id is populated on server-side logs
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where client_query_id is not null and (server is null or server = '')
+----
+true
+
 # check server-side logs exist (scope=DATABASE, no server field)
 query I con2
 select count(*) > 0 from duckdb_logs_parsed('RPC') where server is null or server = ''

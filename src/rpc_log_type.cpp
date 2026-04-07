@@ -11,6 +11,7 @@ LogicalType RPCLogType::GetLogType() {
 	child_list_t<LogicalType> child_list = {
 	    {"message_type", LogicalType::VARCHAR},
 	    {"rpc_connection_id", LogicalType::VARCHAR},
+	    {"client_query_id", LogicalType::UBIGINT},
 	    {"query", LogicalType::VARCHAR},
 	    {"server", LogicalType::VARCHAR},
 	    {"duration_ms", LogicalType::BIGINT},
@@ -20,12 +21,13 @@ LogicalType RPCLogType::GetLogType() {
 	return LogicalType::STRUCT(child_list);
 }
 
-string RPCLogType::ConstructLogMessage(MessageType request_type, const string &rpc_connection_id, const string &query,
-                                       const string &server_uri, int64_t duration_ms, MessageType response_type,
-                                       const string &error) {
+string RPCLogType::ConstructLogMessage(MessageType request_type, const string &rpc_connection_id,
+                                       optional_idx client_query_id, const string &query, const string &server_uri,
+                                       int64_t duration_ms, MessageType response_type, const string &error) {
 	child_list_t<Value> child_list = {
 	    {"message_type", Value(MessageTypeToString(request_type))},
 	    {"rpc_connection_id", Value(rpc_connection_id)},
+	    {"client_query_id", client_query_id.IsValid() ? Value::UBIGINT(client_query_id.GetIndex()) : Value()},
 	    {"query", query.empty() ? Value() : Value(query)},
 	    {"server", server_uri.empty() ? Value() : Value(server_uri)},
 	    {"duration_ms", Value::BIGINT(duration_ms)},

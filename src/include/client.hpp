@@ -28,6 +28,7 @@ public:
 		auto request_type = request_message->Type();
 		string rpc_connection_id;
 		string query;
+		optional_idx client_query_id;
 		switch (request_type) {
 		case MessageType::PREPARE_REQUEST: {
 			auto &msg = request_message->Cast<PrepareRequestMessage>();
@@ -46,6 +47,12 @@ public:
 			break;
 		default:
 			break;
+		}
+
+		// Inject client_query_id from context into the message before sending
+		if (context) {
+			client_query_id = context->transaction.GetActiveQuery();
+			request_message->SetClientQueryId(client_query_id);
 		}
 
 		// Time the request
@@ -67,8 +74,9 @@ public:
 				if (response_message->Type() == MessageType::ERROR) {
 					error = response_message->Cast<ErrorMessage>().Error();
 				}
-				auto msg = RPCLogType::ConstructLogMessage(request_type, rpc_connection_id, query, uri.Http(),
-				                                           end_time - start_time, response_message->Type(), error);
+				auto msg = RPCLogType::ConstructLogMessage(request_type, rpc_connection_id, client_query_id, query,
+				                                           uri.Http(), end_time - start_time,
+				                                           response_message->Type(), error);
 				logger.WriteLog(RPCLogType::NAME, RPCLogType::LEVEL, msg);
 			}
 		}

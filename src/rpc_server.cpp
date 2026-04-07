@@ -128,6 +128,10 @@ static string ExtractConnectionId(ProtocolMessage &msg) {
 	}
 }
 
+static optional_idx ExtractClientQueryId(ProtocolMessage &msg) {
+	return msg.ClientQueryId();
+}
+
 static string ExtractQuery(ProtocolMessage &msg) {
 	if (msg.Type() == MessageType::PREPARE_REQUEST) {
 		return msg.Cast<PrepareRequestMessage>().Query();
@@ -142,9 +146,11 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 
 	string rpc_connection_id;
 	string query;
+	optional_idx client_query_id;
 	int64_t start_time = 0;
 	if (should_log) {
 		rpc_connection_id = ExtractConnectionId(received_message);
+		client_query_id = ExtractClientQueryId(received_message);
 		query = ExtractQuery(received_message);
 		start_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
 		                 .time_since_epoch()
@@ -161,8 +167,8 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		if (response->Type() == MessageType::ERROR) {
 			error = response->Cast<ErrorMessage>().Error();
 		}
-		auto msg = RPCLogType::ConstructLogMessage(received_message.Type(), rpc_connection_id, query, "",
-		                                           end_time - start_time, response->Type(), error);
+		auto msg = RPCLogType::ConstructLogMessage(received_message.Type(), rpc_connection_id, client_query_id, query,
+		                                           "", end_time - start_time, response->Type(), error);
 		logger.WriteLog(RPCLogType::NAME, RPCLogType::LEVEL, msg);
 	}
 
