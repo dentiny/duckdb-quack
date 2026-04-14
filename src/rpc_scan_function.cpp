@@ -245,15 +245,15 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	auto &global_state = input.global_state->Cast<RpcGlobalState>();
 	auto &local_state = input.local_state->Cast<RpcLocalState>();
 
-	if (global_state.done) {
-		return;
-	}
-
-	if (local_state.pending.empty() && !local_state.server_exhausted) {
+	// Only issue a new FETCH if we've drained our local batch and the stream
+	// hasn't signalled end. global_state.done is an optimization hint that
+	// skips wasted FETCHes — it must not pre-empt draining local pending.
+	if (local_state.pending.empty() && !local_state.server_exhausted && !global_state.done) {
 		auto fetch_response =
 		    local_state.client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
 		if (fetch_response->Chunks().empty()) {
 			local_state.server_exhausted = true;
+			global_state.done = true;
 		} else {
 			for (auto &chunk : fetch_response->MutableChunks()) {
 				local_state.pending.push(std::move(chunk));
@@ -262,7 +262,6 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	}
 
 	if (local_state.pending.empty()) {
-		global_state.done = true;
 		return;
 	}
 
