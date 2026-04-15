@@ -129,7 +129,7 @@ true
 
 # check HTTP response status
 query I con2
-select count(*) > 0 from duckdb_logs_parsed('HTTP') where response.status = '200'
+select count(*) > 0 from duckdb_logs_parsed('HTTP') where response.status = 'OK_200'
 ----
 true
 
