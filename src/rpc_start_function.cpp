@@ -161,7 +161,7 @@ static void RpcGenerateKeysFun(ClientContext &context, TableFunctionInput &data_
 		return;
 	}
 	SslKeyGenerator::GenerateSslKeys(server_key_file, private_key_file, dh_param_file, 3650);
-	if (chmod(server_key_file.c_str(), S_IRUSR) || chmod(private_key_file.c_str(), S_IRUSR) /*||
+	if (chmod(server_key_file.c_str(), 400) || chmod(private_key_file.c_str(), 400) /*||
 	    chmod(dh_param_file.c_str(), S_IRUSR)*/) {
 		unlink(server_key_file.c_str());
 		unlink(private_key_file.c_str());
