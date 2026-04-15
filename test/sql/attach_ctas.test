@@ -6,6 +6,11 @@ require quack
 
 foreach server 'quack:localhost'
 
+
+statement ok
+set rpc_default_token='asdf'
+
+
 foreach ssl false true
 
 statement ok con1

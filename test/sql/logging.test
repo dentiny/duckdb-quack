@@ -8,6 +8,9 @@ require quack
 statement ok
 call rpc_generate_keys();
 
+statement ok
+set rpc_default_token='asdf'
+
 statement ok con1
 call rpc_start('quack:localhost', disable_ssl=false);
 

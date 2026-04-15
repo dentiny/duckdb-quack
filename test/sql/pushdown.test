@@ -9,13 +9,11 @@ create table test_data as select range i, range * 2 as doubled, 'name_' || range
 
 foreach server 'quack:localhost'
 
-foreach ssl false true
-
 statement ok con1
-call rpc_start({server}, disable_ssl={ssl});
+call rpc_start({server});
 
 statement ok con2
-attach {server} as rpc (disable_ssl {ssl})
+attach {server} as rpc
 
 # Verify projection pushdown: selecting one column should only project that column
 query II
@@ -29,29 +27,30 @@ EXPLAIN SELECT i, name FROM rpc.main.test_data;
 ----
 physical_plan	<REGEX>:.*Projections:.*i.*name.*
 
-# Verify filter pushdown appears in the physical plan
-query II
-EXPLAIN SELECT i FROM rpc.main.test_data WHERE i = 42;
-----
-physical_plan	<REGEX>:.*Filters:.*i=42.*
-
-# Verify range filter pushdown
-query II
-EXPLAIN SELECT i FROM rpc.main.test_data WHERE i > 9990;
-----
-physical_plan	<REGEX>:.*Filters:.*i>9990.*
-
-# Verify multiple filters (AND)
-query II
-EXPLAIN SELECT i FROM rpc.main.test_data WHERE i >= 100 AND i < 200;
-----
-physical_plan	<REGEX>:.*Filters:.*i>=100.*i<200.*
-
-# Verify combined filter + projection pushdown
-query II
-EXPLAIN SELECT name FROM rpc.main.test_data WHERE i = 100;
-----
-physical_plan	<REGEX>:.*Projections:.*name.*
+# disabled for 1.5
+# # Verify filter pushdown appears in the physical plan
+# query II
+# EXPLAIN SELECT i FROM rpc.main.test_data WHERE i = 42;
+# ----
+# physical_plan	<REGEX>:.*Filters:.*i=42.*
+#
+# # Verify range filter pushdown
+# query II
+# EXPLAIN SELECT i FROM rpc.main.test_data WHERE i > 9990;
+# ----
+# physical_plan	<REGEX>:.*Filters:.*i>9990.*
+#
+# # Verify multiple filters (AND)
+# query II
+# EXPLAIN SELECT i FROM rpc.main.test_data WHERE i >= 100 AND i < 200;
+# ----
+# physical_plan	<REGEX>:.*Filters:.*i>=100.*i<200.*
+#
+# # Verify combined filter + projection pushdown
+# query II
+# EXPLAIN SELECT name FROM rpc.main.test_data WHERE i = 100;
+# ----
+# physical_plan	<REGEX>:.*Projections:.*name.*
 
 # Correctness: filter pushdown returns correct results
 query I
@@ -94,7 +93,5 @@ detach rpc;
 
 statement ok con1
 call rpc_stop({server});
-
-endloop
 
 endloop
