@@ -51,7 +51,12 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 	PostRequestInfo post_request(request_url, headers, *params,
 	                             reinterpret_cast<const_data_ptr_t>(write_stream.GetData()),
 	                             write_stream.GetPosition());
-	auto response = http_util.Request(post_request, http_client);
+	unique_ptr<HTTPResponse> response;
+	try {
+		response = http_util.Request(post_request, http_client);
+	} catch (std::exception &e) {
+		throw IOException("Failed to send message: %s", e.what());
+	}
 
 	if (!response || !response->Success()) {
 		string error = response ? response->GetError() : "no response";
