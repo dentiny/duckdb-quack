@@ -4,6 +4,10 @@
 
 require quack
 
+require httpfs
+
+set ignore_error_messages __none__
+
 statement ok
 set rpc_default_token='asdf'
 
@@ -127,7 +131,7 @@ true
 
 # check HTTP response status
 query I con2
-select count(*) > 0 from duckdb_logs_parsed('HTTP') where response.status = '200'
+select count(*) > 0 from duckdb_logs_parsed('HTTP') where response.status = 'OK_200'
 ----
 true
 
