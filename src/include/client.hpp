@@ -117,6 +117,7 @@ private:
 
 private:
 	unique_ptr<HTTPClient> http_client;
+	unique_ptr<HTTPParams> http_params;
 };
 
 } // namespace duckdb

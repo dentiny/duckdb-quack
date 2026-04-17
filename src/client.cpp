@@ -36,23 +36,22 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 
 	auto &http_util = HTTPUtil::Get(db);
 	auto request_url = uri.Http() + "/rpc";
-	auto params = http_util.InitializeParameters(*context, request_url);
-	if (uri.Ssl()) {
-		params->verify_ssl = false;
-		params->override_verify_ssl = true;
+	if (!http_params) {
+		http_params = http_util.InitializeParameters(*context, request_url);
 	}
 	if (http_client) {
-		http_client->Initialize(*params);
+		http_client->Initialize(*http_params);
 	}
 
 	HTTPHeaders headers;
 	headers.Insert("Content-Type", "application/duckdb");
 
-	PostRequestInfo post_request(request_url, headers, *params,
+	PostRequestInfo post_request(request_url, headers, *http_params,
 	                             reinterpret_cast<const_data_ptr_t>(write_stream.GetData()),
 	                             write_stream.GetPosition());
 	unique_ptr<HTTPResponse> response;
 	try {
+		// funny side-effect: Request will create (and populate) http_client if nullptr is passed
 		response = http_util.Request(post_request, http_client);
 	} catch (std::exception &e) {
 		throw IOException("Failed to send message: %s", e.what());
