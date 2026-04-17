@@ -57,7 +57,7 @@ string RpcServer::CreateNewConnection(const string &session_id) {
 static optional_idx GetEstimatedCardinality(ClientContext &context) {
 	optional_idx estimated_cardinality = optional_idx::Invalid();
 	auto &profiler = QueryProfiler::Get(context);
-	if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1) {
+	if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1 && profiler.GetRoot()->children[0]) {
 		auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
 		if (profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO)) {
 			auto extra_info_map =
