@@ -234,10 +234,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 		    getvariable('whoami_provider')::VARCHAR AS provider,
 		    getvariable('whoami_hostname')::VARCHAR AS hostname,
 		    getvariable('whoami_region')::VARCHAR   AS region,
-		    (epoch_us(current_timestamp) - COALESCE(
+		    to_microseconds(epoch_us(current_timestamp) - COALESCE(
 		      epoch_us(getvariable('whoami_started_at')::TIMESTAMPTZ),
 		      current_setting('quack_loaded_at_us')::BIGINT
-		    )) * INTERVAL 1 MICROSECOND  AS uptime,
+		    ))                             AS uptime,
 		    current_timestamp              AS ts_now,
 		    json_merge_patch(
 		      json_object(
