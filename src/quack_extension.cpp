@@ -14,6 +14,11 @@
 
 #include "catalog.hpp"
 #include "duckdb/parser/parser.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/client_data.hpp"
+#include "duckdb/main/connection.hpp"
+#include "duckdb/main/database.hpp"
+#include "duckdb/catalog/default/default_table_functions.hpp"
 
 namespace duckdb {
 
@@ -92,11 +97,40 @@ static void RpcUriParser(const DataChunk &args, ExpressionState &, Vector &resul
 	                                  {"url", Value(parsed.Http())}}));
 }
 
+static void QuackIdentifyFun(ClientContext &, TableFunctionInput &, DataChunk &) {
+	// No-op: side effects are in bind.
+}
+
+static unique_ptr<FunctionData> QuackIdentifyBind(ClientContext &ctx, TableFunctionBindInput &input,
+                                                   vector<LogicalType> &return_types, vector<string> &names) {
+	auto &config = ClientConfig::GetConfig(ctx);
+	for (auto &kv : input.named_parameters) {
+		if (kv.second.IsNull()) {
+			continue;
+		}
+		config.SetUserVariable("whoami_" + kv.first, kv.second);
+	}
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("ok");
+	return nullptr;
+}
+
+static TableFunction GetQuackIdentifyFunction() {
+	TableFunction fun("quack_identify", {}, QuackIdentifyFun, QuackIdentifyBind);
+	fun.named_parameters["name"]     = LogicalType::VARCHAR;
+	fun.named_parameters["provider"] = LogicalType::VARCHAR;
+	fun.named_parameters["hostname"] = LogicalType::VARCHAR;
+	fun.named_parameters["region"]   = LogicalType::VARCHAR;
+	fun.named_parameters["meta"]     = LogicalType::VARCHAR; // JSON as string
+	return fun;
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	loader.SetDescription("Adds support for DuckDB Remote Procedure Calls (RPC)");
 
 	loader.RegisterFunction(RpcScanFunction::GetFunction());
 	loader.RegisterFunction(RpcScanByNameFunction::GetFunction());
+	loader.RegisterFunction(GetQuackIdentifyFunction());
 
 	loader.RegisterFunction(RpcStartFunction::GetFunction());
 	loader.RegisterFunction(RpcStopFunction::GetFunction());
@@ -143,6 +177,42 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          LogicalType::UBIGINT, Value::UBIGINT(12));
 	config.AddExtensionOption("quack_fetch_batch_bytes", "Maximum estimated payload bytes per FETCH response",
 	                          LogicalType::UBIGINT, Value::UBIGINT(4 * (1 << 20)));
+
+	// Process-wide fallback anchor for whoami().uptime when whoami_started_at isn't set.
+	// Stored as BIGINT epoch-microseconds to stay TZ-invariant regardless of ICU state.
+	config.AddExtensionOption("quack_loaded_at_us", "Epoch microseconds at extension load",
+	                          LogicalType::BIGINT,
+	                          Value::BIGINT(Timestamp::GetCurrentTimestamp().value));
+
+	// whoami() contract — register the table macro directly via the default-table-macro
+	// machinery so function resolution in the body is deferred to invocation time
+	// (avoids the get_current_timestamp / core_functions chicken-and-egg).
+	static const DefaultTableMacro whoami_macro = {
+	    DEFAULT_SCHEMA,
+	    "whoami",
+	    {nullptr},                    // no positional parameters
+	    {{nullptr, nullptr}},         // no named parameters
+	    R"SQL(SELECT
+		    getvariable('whoami_name')::VARCHAR     AS name,
+		    getvariable('whoami_provider')::VARCHAR AS provider,
+		    getvariable('whoami_hostname')::VARCHAR AS hostname,
+		    getvariable('whoami_region')::VARCHAR   AS region,
+		    (epoch_us(current_timestamp) - COALESCE(
+		      epoch_us(getvariable('whoami_started_at')::TIMESTAMPTZ),
+		      current_setting('quack_loaded_at_us')::BIGINT
+		    )) * INTERVAL 1 MICROSECOND  AS uptime,
+		    current_timestamp              AS ts_now,
+		    json_merge_patch(
+		      json_object(
+		        'duckdb_version', version(),
+		        'platform',       (SELECT platform FROM pragma_platform())
+		      ),
+		      COALESCE(TRY_CAST(getvariable('whoami_meta') AS JSON), '{}'::JSON)
+		    )                              AS meta
+	    )SQL",
+	};
+	auto whoami_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(whoami_macro);
+	loader.RegisterFunction(*whoami_info);
 }
 
 void QuackExtension::Load(ExtensionLoader &loader) {
