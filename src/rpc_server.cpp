@@ -169,7 +169,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
-		string session_id = RpcServer::GenerateSessionId();
+		string session_id = GenerateSessionId();
 		if (!EvaluateAuthQuery(
 		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authentication_function")),
 		        Value(session_id), Value(connection_request_message.AuthString()))) {
@@ -200,9 +200,11 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		if (prepare_request_message.ImmediatelyExecute()) {
 			vector<Value> params; // TODO allow parameters here?
 			auto query_result = statement->PendingQuery(params, true)->Execute();
+
 			if (query_result->HasError()) {
 				return make_uniq<ErrorMessage>(query_result->GetError());
 			}
+
 			rpc_connection->duckdb_query_result = std::move(query_result);
 			// Fresh query → restart batch numbering. Clients' local state is re-initialized on
 			// a new PREPARE, so indices start at 0 again.
@@ -228,16 +230,13 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		}
 
 		Value max_chunks_val;
-		Value max_bytes_val;
 		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
-		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_bytes", max_bytes_val);
 		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
-		auto max_bytes_per_batch = max_bytes_val.GetValue<uint64_t>();
 
 		vector<unique_ptr<DataChunk>> batch;
-		idx_t bytes_est = 0;
-		while (batch.size() < max_chunks_per_batch && bytes_est < max_bytes_per_batch) {
+		while (batch.size() < max_chunks_per_batch) {
 			auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
+
 			if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
 				auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 				rpc_connection->duckdb_query_result.reset();
@@ -247,7 +246,6 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 				rpc_connection->duckdb_query_result.reset();
 				break;
 			}
-			bytes_est += result_chunk->size() * result_chunk->ColumnCount() * 8;
 			batch.push_back(std::move(result_chunk));
 		}
 		auto assigned_batch_index = rpc_connection->next_batch_index++;

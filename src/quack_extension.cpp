@@ -141,8 +141,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	config.AddExtensionOption("quack_fetch_batch_chunks", "Maximum number of DataChunks returned per FETCH response",
 	                          LogicalType::UBIGINT, Value::UBIGINT(12));
-	config.AddExtensionOption("quack_fetch_batch_bytes", "Maximum estimated payload bytes per FETCH response",
-	                          LogicalType::UBIGINT, Value::UBIGINT(4 * (1 << 20)));
 }
 
 void QuackExtension::Load(ExtensionLoader &loader) {
