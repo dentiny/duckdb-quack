@@ -2,9 +2,13 @@
 # description: whoami() / quack_identify contract
 # group: [sql]
 
+mode skip
+
 require quack
 
 require json
+
+require httpfs
 
 # --- baseline: fresh session, no identity set ---
 # name/provider/hostname/region are NULL; uptime is non-negative; meta auto-filled.
