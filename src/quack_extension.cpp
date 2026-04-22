@@ -204,8 +204,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// whoami() identity fields — global settings so they propagate across all sessions
 	// (rpc_call creates fresh server-side sessions that wouldn't see per-connection state).
 	config.AddExtensionOption("whoami_name", "Human-readable name for this node", LogicalType::VARCHAR, Value());
-	config.AddExtensionOption("whoami_provider", "Deployment provider (ec2, docker, local, ...)",
-	                          LogicalType::VARCHAR, Value());
+	config.AddExtensionOption("whoami_provider", "Deployment provider (ec2, docker, local, ...)", LogicalType::VARCHAR,
+	                          Value());
 	config.AddExtensionOption("whoami_hostname", "Network hostname / public address", LogicalType::VARCHAR, Value());
 	config.AddExtensionOption("whoami_region", "Deployment region", LogicalType::VARCHAR, Value());
 	config.AddExtensionOption("whoami_started_at", "Node start time (ISO-8601 TIMESTAMP)", LogicalType::VARCHAR,
