@@ -21,11 +21,17 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	}
 
 	auto query = input.inputs[1].GetValue<string>();
-	auto disable_ssl = input.named_parameters.find("disable_ssl") != input.named_parameters.end() &&
-	                   input.named_parameters["disable_ssl"].GetValue<bool>();
+	auto initial_uri = RpcUri(input.inputs[0].GetValue<string>());
+
+	// no ssl on local by default
+	auto enable_ssl = !initial_uri.IsLocal();
+	if (input.named_parameters.find("disable_ssl") != input.named_parameters.end()) {
+		enable_ssl = !input.named_parameters["disable_ssl"].GetValue<bool>();
+	}
 
 	auto bind_data = make_uniq<RpcBindData>();
-	bind_data->server_uri = RpcUri(input.inputs[0].GetValue<string>(), !disable_ssl);
+
+	bind_data->server_uri = RpcUri(initial_uri.Uri(), enable_ssl);
 
 	bind_data->initial_client = RpcClient::GetClient(bind_data->server_uri);
 	bind_data->initial_client->SetContext(&context);

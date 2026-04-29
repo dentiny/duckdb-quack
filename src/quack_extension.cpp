@@ -60,11 +60,16 @@ static void RegisterQuackSecretType(ExtensionLoader &loader) {
 static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
                                      AttachedDatabase &db, const string &name, AttachInfo &info,
                                      AttachOptions &attach_options) {
-	auto diable_ssl = attach_options.options.find("disable_ssl") != attach_options.options.end() &&
-	                  attach_options.options["disable_ssl"].GetValue<bool>();
 	// info.path may or may not already carry the "quack:" prefix.
 	auto uri = StringUtil::StartsWith(info.path, "quack:") ? info.path : "quack:" + info.path;
-	return make_uniq<RpcCatalog>(db, RpcUri(uri, !diable_ssl), context);
+	auto initial_uri = RpcUri(uri);
+
+	// no ssl on local by default
+	auto enable_ssl = !initial_uri.IsLocal();
+	if (attach_options.options.find("disable_ssl") != attach_options.options.end()) {
+		enable_ssl = !attach_options.options["disable_ssl"].GetValue<bool>();
+	}
+	return make_uniq<RpcCatalog>(db, RpcUri(uri, enable_ssl), context);
 }
 
 static unique_ptr<TransactionManager> RpcCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,

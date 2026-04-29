@@ -19,10 +19,10 @@ foreach server 'quack:localhost'
 foreach ssl true
 
 statement ok con1
-call rpc_start({server}, disable_ssl=true);
+call rpc_start({server});
 
 statement ok con2
-attach {server} as rpc (disable_ssl true);
+attach {server} as rpc;
 
 # Single table scan should work
 query I
