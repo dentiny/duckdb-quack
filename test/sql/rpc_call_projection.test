@@ -9,61 +9,57 @@ require httpfs
 set ignore_error_messages __none__
 
 statement ok con1
-call rpc_start('quack:localhost', disable_ssl=true);
+call rpc_start('quack:localhost');
 
 # Pick the non-first column — exercises the column_ids remap in RpcScan.
 query I con2
-SELECT b FROM rpc_call('quack:localhost', 'SELECT 1 as a, ''2'' as b', disable_ssl=true);
+SELECT b FROM rpc_call('quack:localhost', 'SELECT 1 as a, ''2'' as b');
 ----
 2
 
 # Multi-column projection with reordering — output wants b, a (reverse of server order).
 query II con2
-SELECT b, a FROM rpc_call('quack:localhost', 'SELECT 1 as a, ''2'' as b', disable_ssl=true);
+SELECT b, a FROM rpc_call('quack:localhost', 'SELECT 1 as a, ''2'' as b');
 ----
 2	1
 
 # Types differ per column — catches type-mismatch (INTEGER vs VARCHAR).
 query I con2
-SELECT b FROM rpc_call('quack:localhost', 'SELECT 42 as a, ''hello'' as b', disable_ssl=true);
+SELECT b FROM rpc_call('quack:localhost', 'SELECT 42 as a, ''hello'' as b');
 ----
 hello
 
 # Projection of a single middle column.
 query I con2
 SELECT middle FROM rpc_call('quack:localhost',
-    'SELECT 1 as first, 2.5 as middle, ''last'' as last',
-    disable_ssl=true);
+    'SELECT 1 as first, 2.5 as middle, ''last'' as last');
 ----
 2.5
 
 # No projection — SELECT * — identity mapping should still work.
 query III con2
 SELECT * FROM rpc_call('quack:localhost',
-    'SELECT 1 as a, ''two'' as b, true as c',
-    disable_ssl=true);
+    'SELECT 1 as a, ''two'' as b, true as c');
 ----
 1	two	true
 
 # Projection + alias at the outer SELECT.
 query I con2
 SELECT b AS renamed FROM rpc_call('quack:localhost',
-    'SELECT 1 as a, ''hello'' as b',
-    disable_ssl=true);
+    'SELECT 1 as a, ''hello'' as b');
 ----
 hello
 
 # Projection through aggregation — only needs `b`, drops `a`.
 query I con2
 SELECT count(b) FROM rpc_call('quack:localhost',
-    'SELECT 1 as a, ''x'' as b UNION ALL SELECT 2, ''y''',
-    disable_ssl=true);
+    'SELECT 1 as a, ''x'' as b UNION ALL SELECT 2, ''y''');
 ----
 2
 
 # Same via rpc_call_by_name (ATTACH path).
 statement ok con2
-attach 'quack:localhost' as r (type quack, disable_ssl true);
+attach 'quack:localhost' as r (type quack);
 
 query I con2
 SELECT b FROM rpc_call_by_name('r', 'SELECT 1 as a, ''2'' as b');

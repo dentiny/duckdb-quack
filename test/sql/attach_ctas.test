@@ -15,13 +15,11 @@ statement ok
 set rpc_default_token='asdf'
 
 
-foreach ssl true
-
 statement ok con1
-call rpc_start({server}, disable_ssl={ssl});
+call rpc_start({server});
 
 statement ok con2
-attach {server} as rpc (disable_ssl {ssl})
+attach {server} as rpc
 
 statement ok
 create table rpc.t as select range a from range(10);
@@ -39,7 +37,5 @@ detach rpc;
 
 statement ok con1
 call rpc_stop({server});
-
-endloop
 
 endloop

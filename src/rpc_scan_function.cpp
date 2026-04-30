@@ -21,11 +21,17 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	}
 
 	auto query = input.inputs[1].GetValue<string>();
-	auto disable_ssl = input.named_parameters.find("disable_ssl") != input.named_parameters.end() &&
-	                   input.named_parameters["disable_ssl"].GetValue<bool>();
+	auto initial_uri = RpcUri(input.inputs[0].GetValue<string>());
+
+	// no ssl on local by default
+	auto enable_ssl = !initial_uri.IsLocal();
+	if (input.named_parameters.find("disable_ssl") != input.named_parameters.end()) {
+		enable_ssl = !input.named_parameters["disable_ssl"].GetValue<bool>();
+	}
 
 	auto bind_data = make_uniq<RpcBindData>();
-	bind_data->server_uri = RpcUri(input.inputs[0].GetValue<string>(), !disable_ssl);
+
+	bind_data->server_uri = RpcUri(initial_uri.Uri(), enable_ssl);
 
 	bind_data->initial_client = RpcClient::GetClient(bind_data->server_uri);
 	bind_data->initial_client->SetContext(&context);
@@ -57,7 +63,6 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	auto bind_response = bind_data->initial_client->Request<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
-	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
@@ -106,7 +111,6 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 	auto bind_response = rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
-	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
@@ -135,12 +139,15 @@ struct RpcLocalState : public LocalTableFunctionState {
 };
 
 struct RpcGlobalState : GlobalTableFunctionState {
-	explicit RpcGlobalState(idx_t max_threads_p) : max_threads(max_threads_p), done(false) {
+	explicit RpcGlobalState(idx_t max_threads_p, vector<column_t> column_ids_p, vector<idx_t> projection_id_p)
+	    : max_threads(max_threads_p), column_ids(column_ids_p), projection_ids(projection_id_p), done(false) {
 	}
 	idx_t MaxThreads() const override {
 		return max_threads;
 	}
 	idx_t max_threads;
+	vector<column_t> column_ids;
+	vector<idx_t> projection_ids;
 	atomic<bool> done;
 };
 
@@ -180,32 +187,29 @@ static string BuildPushdownQuery(const RpcBindData &bind_data, const TableFuncti
 	// Projection: select only the columns DuckDB actually needs in the output.
 	// With filter_prune, projection_ids indexes into column_ids for output columns only.
 	// Filter-only columns are in column_ids but NOT in projection_ids — they go in WHERE, not SELECT.
-	if (!input.column_ids.empty() && !bind_data.column_names.empty()) {
-		vector<string> selected_columns;
-		if (!input.projection_ids.empty()) {
-			for (auto &proj_id : input.projection_ids) {
-				auto col_id = input.column_ids[proj_id];
-				if (IsRowIdColumnId(col_id) || col_id >= bind_data.column_names.size()) {
-					continue;
-				}
-				selected_columns.push_back(KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_id]));
-			}
-		} else {
-			for (auto &col_id : input.column_ids) {
-				if (IsRowIdColumnId(col_id) || col_id >= bind_data.column_names.size()) {
-					continue;
-				}
-				selected_columns.push_back(KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_id]));
-			}
-		}
-		if (!selected_columns.empty()) {
-			query = "SELECT " + StringUtil::Join(selected_columns, ", ");
-		}
-	}
-	if (query.empty()) {
-		query = "SELECT *";
-	}
-	query += StringUtil::Format(" FROM %s", bind_data.table_name);
+	// if (!input.column_ids.empty() && !bind_data.column_names.empty()) {
+	// 	vector<string> selected_columns;
+	// 	if (!input.projection_ids.empty()) {
+	// 		for (auto &proj_id : input.projection_ids) {
+	// 			auto col_id = input.column_ids[proj_id];
+	// 			if (IsRowIdColumnId(col_id) || col_id >= bind_data.column_names.size()) {
+	// 				continue;
+	// 			}
+	// 			selected_columns.push_back(KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_id]));
+	// 		}
+	// 	} else {
+	// 		for (auto &col_id : input.column_ids) {
+	// 			if (IsRowIdColumnId(col_id) || col_id >= bind_data.column_names.size()) {
+	// 				continue;
+	// 			}
+	// 			selected_columns.push_back(KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_id]));
+	// 		}
+	// 	}
+	// 	if (!selected_columns.empty()) {
+	// 		query = "SELECT " + StringUtil::Join(selected_columns, ", ") + " ";
+	// 	}
+	// }
+	query += StringUtil::Format("FROM %s", bind_data.table_name);
 	//
 	// // Filters: build WHERE clause from pushable filters
 	// if (input.filters) {
@@ -233,9 +237,6 @@ static string BuildPushdownQuery(const RpcBindData &bind_data, const TableFuncti
 unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->CastNoConst<RpcBindData>();
 
-	bind_data.column_ids = input.column_ids;
-	bind_data.projection_ids = input.projection_ids;
-
 	// For the catalog path (ATTACH), LookupEntry only prepares without executing
 	// to avoid the server-side result being overwritten by subsequent lookups.
 	// We execute the query here, right before scanning, so the result is fresh.
@@ -250,8 +251,9 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 		bind_data.initial_results = std::move(response_message->MutableChunks());
 	}
 
-	// FIXME
-	return make_uniq<RpcGlobalState>(1);
+	// we only multithread if there is more to fetch
+	return make_uniq<RpcGlobalState>(bind_data.needs_more_fetch ? GlobalTableFunctionState::MAX_THREADS : 1,
+	                                 input.column_ids, input.projection_ids);
 }
 
 unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
@@ -313,10 +315,12 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 
 	auto chunk = std::move(local_state.pending.front());
 	local_state.pending.pop();
-
+	if (!chunk) { // somehow this can happen
+		return;
+	}
 	auto &response_chunk = *chunk;
-	const auto &col_ids = bind_data.column_ids;
-	const auto &proj_ids = bind_data.projection_ids;
+	const auto &col_ids = global_state.column_ids;
+	const auto &proj_ids = global_state.projection_ids;
 	if (response_chunk.ColumnCount() == output.ColumnCount() && col_ids.empty() && proj_ids.empty()) {
 		output.Reference(response_chunk);
 	} else {
@@ -341,14 +345,6 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	output.SetCardinality(response_chunk.size());
 }
 
-static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const FunctionData *bind_data_p) {
-	auto &bind_data = bind_data_p->Cast<RpcBindData>();
-	if (bind_data.estimated_cardinality.IsValid()) {
-		return make_uniq<NodeStatistics>(bind_data.estimated_cardinality.GetIndex());
-	}
-	return nullptr;
-}
-
 static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
 	auto &local_state = input.local_state->Cast<RpcLocalState>();
 	// If we haven't received a batch yet, fall back to 0 so downstream doesn't choke; the
@@ -362,8 +358,6 @@ InsertionOrderPreservingMap<string> RpcCallToString(TableFunctionToStringInput &
 	auto &bind_data = input.bind_data->Cast<RpcBindData>();
 	InsertionOrderPreservingMap<string> result;
 	result["Server"] = bind_data.server_uri.Uri();
-	result["Cardinality"] =
-	    bind_data.estimated_cardinality.IsValid() ? to_string(bind_data.estimated_cardinality.GetIndex()) : "?";
 	return result;
 }
 
@@ -371,7 +365,6 @@ TableFunction RpcScanFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
 	                         RpcInitLocal);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
-	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
 	fun.get_partition_data = RpcGetPartitionData;
 	fun.to_string = RpcCallToString;
@@ -383,7 +376,6 @@ TableFunction RpcScanFunction::GetFunction() {
 TableFunction RpcScanByNameFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan,
 	                         RpcBindCatalogName, RpcInitGlobal, RpcInitLocal);
-	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
 	fun.get_partition_data = RpcGetPartitionData;
 	fun.to_string = RpcCallToString;

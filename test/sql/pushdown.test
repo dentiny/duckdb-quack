@@ -17,7 +17,7 @@ statement ok con1
 call rpc_start({server});
 
 statement ok con2
-attach {server} as rpc (disable_ssl true)
+attach {server} as rpc
 
 # Verify projection pushdown: selecting one column should only project that column
 query II
