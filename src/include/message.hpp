@@ -101,16 +101,11 @@ private:
 class PrepareResponseMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_RESPONSE;
-	// old
-	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p)
-	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p), has_results(false),
-	      needs_more_fetch(true) {};
 
-	// new
 	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p,
-	                       vector<unique_ptr<DataChunk>> chunks_p, bool needs_more_fetch_p)
-	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p), has_results(true),
-	      chunks(std::move(chunks_p)), needs_more_fetch(needs_more_fetch_p) {};
+	                       unique_ptr<ColumnDataCollection> results_p, bool needs_more_fetch_p)
+	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p), needs_more_fetch(needs_more_fetch_p),
+	      results(std::move(results_p)) {};
 
 	const vector<LogicalType> &Types() const {
 		return result_types;
@@ -120,30 +115,22 @@ public:
 		return result_names;
 	}
 
-	const vector<unique_ptr<DataChunk>> &Chunks() const {
-		return chunks;
-	}
-	vector<unique_ptr<DataChunk>> &MutableChunks() {
-		return chunks;
+	unique_ptr<ColumnDataCollection> &MutableResults() {
+		return results;
 	}
 
 	bool NeedsMoreFetch() const {
 		return needs_more_fetch;
 	}
-	bool HasResults() const {
-		return has_results;
-	}
+
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
 private:
 	vector<LogicalType> result_types;
 	vector<string> result_names;
-
-	bool has_results; // this is to flag the new message format, should never need to be accessed
 	bool needs_more_fetch;
-	vector<unique_ptr<DataChunk>> chunks; // TODO make this a ColumnDataCollection?!
-	                                      // unique_ptr<ColumnDataCollection> results;
+	unique_ptr<ColumnDataCollection> results;
 };
 
 // TODO this is where auth goes
@@ -204,26 +191,24 @@ public:
 	static constexpr MessageType TYPE = MessageType::FETCH_RESPONSE;
 
 	FetchResponseMessage() : ProtocolMessage(TYPE) {};
-	explicit FetchResponseMessage(vector<unique_ptr<DataChunk>> chunks_p)
-	    : ProtocolMessage(TYPE), chunks(std::move(chunks_p)) {};
-	FetchResponseMessage(vector<unique_ptr<DataChunk>> chunks_p, optional_idx batch_index_p)
-	    : ProtocolMessage(TYPE), chunks(std::move(chunks_p)), batch_index(batch_index_p) {};
+	explicit FetchResponseMessage(unique_ptr<ColumnDataCollection> results_p)
+	    : ProtocolMessage(TYPE), results(std::move(results_p)) {};
+	FetchResponseMessage(unique_ptr<ColumnDataCollection> results_p, optional_idx batch_index_p)
+	    : ProtocolMessage(TYPE), results(std::move(results_p)), batch_index(batch_index_p) {};
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
-	const vector<unique_ptr<DataChunk>> &Chunks() const {
-		return chunks;
+	unique_ptr<ColumnDataCollection> &MutableResults() {
+		return results;
 	}
-	vector<unique_ptr<DataChunk>> &MutableChunks() {
-		return chunks;
-	}
+
 	optional_idx BatchIndex() const {
 		return batch_index;
 	}
 
 private:
-	vector<unique_ptr<DataChunk>> chunks;
+	unique_ptr<ColumnDataCollection> results;
 	optional_idx batch_index;
 };
 
