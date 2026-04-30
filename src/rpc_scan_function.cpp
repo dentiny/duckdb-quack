@@ -335,8 +335,6 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 		// we did not have anything cached and then request to the server did not yield anything - we are done
 		break;
 	}
-
-	// TODO projections
 }
 
 static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
