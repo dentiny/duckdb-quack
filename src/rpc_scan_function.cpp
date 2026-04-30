@@ -66,11 +66,8 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
-	bind_data->needs_more_fetch = true;
-	if (bind_response->HasResults()) {
-		bind_data->initial_results = std::move(bind_response->MutableChunks());
-		bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-	}
+	bind_data->results = std::move(bind_response->MutableResults());
+	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
 
 	return bind_data;
 }
@@ -115,22 +112,21 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 	names = bind_response->Names();
 
 	// new stuff
-	bind_data->needs_more_fetch = true;
-	if (bind_response->HasResults()) {
-		bind_data->initial_results = std::move(bind_response->MutableChunks());
-		bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-	}
+	bind_data->results = std::move(bind_response->MutableResults());
+	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
+
 	return bind_data;
 }
 
 struct RpcLocalState : public LocalTableFunctionState {
 	unique_ptr<RpcClient> client;
-	std::queue<unique_ptr<DataChunk>> pending;
-	bool server_exhausted = false;
-	//! batch_index of the batch that `pending` currently holds chunks from (server-assigned).
+	//! batch_index of the batch that `fetched_results` currently holds chunks from (server-assigned).
 	//! Surfaced to DuckDB via get_partition_data so downstream order-preserving operators
 	//! (CTAS, COPY TO, INSERT SELECT) can run the scan in parallel without losing order.
 	optional_idx current_batch_index;
+
+	queue<unique_ptr<DataChunk>> results;
+	ColumnDataScanState scan_state;
 
 	explicit RpcLocalState() {
 	}
@@ -139,8 +135,9 @@ struct RpcLocalState : public LocalTableFunctionState {
 };
 
 struct RpcGlobalState : GlobalTableFunctionState {
-	explicit RpcGlobalState(idx_t max_threads_p, vector<column_t> column_ids_p, vector<idx_t> projection_id_p)
-	    : max_threads(max_threads_p), column_ids(column_ids_p), projection_ids(projection_id_p), done(false) {
+	explicit RpcGlobalState(vector<column_t> column_ids_p, vector<idx_t> projection_id_p, bool needs_more_fetch_p)
+	    : max_threads(needs_more_fetch_p ? MAX_THREADS : 1), column_ids(column_ids_p), projection_ids(projection_id_p),
+	      needs_more_fetch(needs_more_fetch_p) {
 	}
 	idx_t MaxThreads() const override {
 		return max_threads;
@@ -148,7 +145,7 @@ struct RpcGlobalState : GlobalTableFunctionState {
 	idx_t max_threads;
 	vector<column_t> column_ids;
 	vector<idx_t> projection_ids;
-	atomic<bool> done;
+	atomic<bool> needs_more_fetch;
 };
 
 static bool CanPushdownFilter(const TableFilter &filter) {
@@ -248,37 +245,32 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 		auto response_message = client->Request<PrepareResponseMessage>(
 		    make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 		bind_data.needs_more_fetch = response_message->NeedsMoreFetch();
-		bind_data.initial_results = std::move(response_message->MutableChunks());
+		bind_data.results = std::move(response_message->MutableResults());
 	}
 
 	// we only multithread if there is more to fetch
-	return make_uniq<RpcGlobalState>(bind_data.needs_more_fetch ? GlobalTableFunctionState::MAX_THREADS : 1,
-	                                 input.column_ids, input.projection_ids);
+	return make_uniq<RpcGlobalState>(input.column_ids, input.projection_ids, bind_data.needs_more_fetch);
 }
 
 unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
                                                  GlobalTableFunctionState *global_state_p) {
 	auto &bind_data = input.bind_data->CastNoConst<RpcBindData>();
-	auto &global_state = global_state_p->Cast<RpcGlobalState>();
-	if (global_state.done) {
-		return nullptr;
-	}
+	lock_guard<mutex> guard(bind_data.lock);
 
 	auto local_state = make_uniq<RpcLocalState>();
 	// re-use initial client from bind if possible
-	if (bind_data.initial_client) { // TODO possible race here, too?
-		local_state->client = unique_ptr<RpcClient>(bind_data.initial_client.release());
+	if (bind_data.initial_client) {
+		local_state->client = std::move(bind_data.initial_client);
 	} else {
 		local_state->client = RpcClient::GetClient(bind_data.server_uri);
 		local_state->client->SetContext(&context.client);
 	}
 
-	// TODO we need a lock here
-	if (!bind_data.initial_results.empty()) {
-		for (auto &chunk : bind_data.initial_results) {
-			local_state->pending.push(std::move(chunk));
+	if (!bind_data.results.empty()) {
+		for (auto &chunk : bind_data.results) {
+			local_state->results.push(std::move(chunk));
 		}
-		bind_data.initial_results.clear();
+		bind_data.results.clear();
 	}
 	return local_state;
 }
@@ -288,61 +280,61 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	auto &global_state = input.global_state->Cast<RpcGlobalState>();
 	auto &local_state = input.local_state->Cast<RpcLocalState>();
 
-	// Only issue a new FETCH if we've drained our local batch and the stream
-	// hasn't signalled end. global_state.done is an optimization hint that
-	// skips wasted FETCHes — it must not pre-empt draining local pending.
-	if (local_state.pending.empty() && !local_state.server_exhausted && !global_state.done &&
-	    bind_data.needs_more_fetch) {
-		auto fetch_response =
-		    local_state.client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
-		if (fetch_response->Chunks().empty()) {
-			local_state.server_exhausted = true;
-			global_state.done = true;
-		} else {
-			// Record this batch's server-assigned index so DuckDB can restore order
-			// downstream when chunks from this local state are interleaved with those
-			// produced by sibling threads.
-			local_state.current_batch_index = fetch_response->BatchIndex();
-			for (auto &chunk : fetch_response->MutableChunks()) {
-				local_state.pending.push(std::move(chunk));
-			}
-		}
-	}
+	while (true) {
+		// first we try to scan from our local results buffer if we have any
+		if (!local_state.results.empty()) {
+			auto chunk = std::move(local_state.results.front());
+			local_state.results.pop();
 
-	if (local_state.pending.empty()) {
-		return;
-	}
-
-	auto chunk = std::move(local_state.pending.front());
-	local_state.pending.pop();
-	if (!chunk) { // somehow this can happen
-		return;
-	}
-	auto &response_chunk = *chunk;
-	const auto &col_ids = global_state.column_ids;
-	const auto &proj_ids = global_state.projection_ids;
-	if (response_chunk.ColumnCount() == output.ColumnCount() && col_ids.empty() && proj_ids.empty()) {
-		output.Reference(response_chunk);
-	} else {
-		// Map each output column to the right response column. DuckDB's pushdown contract:
-		//   - column_ids lists which source columns the scan should read (in that order).
-		//   - projection_ids (when filter_prune=true) indexes into column_ids for the outputs.
-		// The server ignores pushdown and returns every column, so we apply both hops here.
-		for (idx_t i = 0; i < output.ColumnCount(); i++) {
-			idx_t src;
-			if (!proj_ids.empty()) {
-				src = col_ids[proj_ids[i]];
-			} else if (!col_ids.empty()) {
-				src = col_ids[i];
+			auto &response_chunk = *chunk;
+			const auto &col_ids = global_state.column_ids;
+			const auto &proj_ids = global_state.projection_ids;
+			if (response_chunk.ColumnCount() == output.ColumnCount() && col_ids.empty() && proj_ids.empty()) {
+				output.Reference(response_chunk);
 			} else {
-				src = i;
+				// Map each output column to the right response column. DuckDB's pushdown contract:
+				//   - column_ids lists which source columns the scan should read (in that order).
+				//   - projection_ids (when filter_prune=true) indexes into column_ids for the outputs.
+				// The server ignores pushdown and returns every column, so we apply both hops here.
+				for (idx_t i = 0; i < output.ColumnCount(); i++) {
+					idx_t src;
+					if (!proj_ids.empty()) {
+						src = col_ids[proj_ids[i]];
+					} else if (!col_ids.empty()) {
+						src = col_ids[i];
+					} else {
+						src = i;
+					}
+					D_ASSERT(src < response_chunk.ColumnCount());
+					D_ASSERT(response_chunk.data[src].GetType() == output.data[i].GetType());
+					output.data[i].Reference(response_chunk.data[src]);
+				}
 			}
-			D_ASSERT(src < response_chunk.ColumnCount());
-			D_ASSERT(response_chunk.data[src].GetType() == output.data[i].GetType());
-			output.data[i].Reference(response_chunk.data[src]);
+			output.SetCardinality(chunk->size());
+
+			return;
 		}
+
+		// if that did not work, we request more results
+		if (local_state.results.empty() && global_state.needs_more_fetch) {
+			auto fetch_response = local_state.client->Request<FetchResponseMessage>(
+			    make_uniq<FetchRequestMessage>(bind_data.connection_id));
+
+			if (fetch_response->MutableResults().empty()) {
+				// server is done, we are done
+				global_state.needs_more_fetch = false;
+				return;
+			}
+			// set up buffer for scan in next iteration
+			for (auto &chunk : fetch_response->MutableResults()) {
+				local_state.results.push(std::move(chunk));
+			}
+			local_state.current_batch_index = fetch_response->BatchIndex();
+			continue;
+		}
+		// we did not have anything cached and then request to the server did not yield anything - we are done
+		break;
 	}
-	output.SetCardinality(response_chunk.size());
 }
 
 static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
