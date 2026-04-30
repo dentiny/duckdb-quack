@@ -285,8 +285,33 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 		if (!local_state.results.empty()) {
 			auto chunk = std::move(local_state.results.front());
 			local_state.results.pop();
-			output.Reference(*chunk);
+
+			auto &response_chunk = *chunk;
+			const auto &col_ids = global_state.column_ids;
+			const auto &proj_ids = global_state.projection_ids;
+			if (response_chunk.ColumnCount() == output.ColumnCount() && col_ids.empty() && proj_ids.empty()) {
+				output.Reference(response_chunk);
+			} else {
+				// Map each output column to the right response column. DuckDB's pushdown contract:
+				//   - column_ids lists which source columns the scan should read (in that order).
+				//   - projection_ids (when filter_prune=true) indexes into column_ids for the outputs.
+				// The server ignores pushdown and returns every column, so we apply both hops here.
+				for (idx_t i = 0; i < output.ColumnCount(); i++) {
+					idx_t src;
+					if (!proj_ids.empty()) {
+						src = col_ids[proj_ids[i]];
+					} else if (!col_ids.empty()) {
+						src = col_ids[i];
+					} else {
+						src = i;
+					}
+					D_ASSERT(src < response_chunk.ColumnCount());
+					D_ASSERT(response_chunk.data[src].GetType() == output.data[i].GetType());
+					output.data[i].Reference(response_chunk.data[src]);
+				}
+			}
 			output.SetCardinality(chunk->size());
+
 			return;
 		}
 
@@ -312,31 +337,6 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	}
 
 	// TODO projections
-
-	// auto &response_chunk = *chunk;
-	// const auto &col_ids = global_state.column_ids;
-	// const auto &proj_ids = global_state.projection_ids;
-	// if (response_chunk.ColumnCount() == output.ColumnCount() && col_ids.empty() && proj_ids.empty()) {
-	// 	output.Reference(response_chunk);
-	// } else {
-	// 	// Map each output column to the right response column. DuckDB's pushdown contract:
-	// 	//   - column_ids lists which source columns the scan should read (in that order).
-	// 	//   - projection_ids (when filter_prune=true) indexes into column_ids for the outputs.
-	// 	// The server ignores pushdown and returns every column, so we apply both hops here.
-	// 	for (idx_t i = 0; i < output.ColumnCount(); i++) {
-	// 		idx_t src;
-	// 		if (!proj_ids.empty()) {
-	// 			src = col_ids[proj_ids[i]];
-	// 		} else if (!col_ids.empty()) {
-	// 			src = col_ids[i];
-	// 		} else {
-	// 			src = i;
-	// 		}
-	// 		D_ASSERT(src < response_chunk.ColumnCount());
-	// 		D_ASSERT(response_chunk.data[src].GetType() == output.data[i].GetType());
-	// 		output.data[i].Reference(response_chunk.data[src]);
-	// 	}
-	// }
 }
 
 static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
