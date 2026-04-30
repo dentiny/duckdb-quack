@@ -66,9 +66,7 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
-	bind_data->needs_more_fetch = true;
-	D_ASSERT(bind_response->MutableResults());
-	bind_data->initial_results = std::move(bind_response->MutableResults());
+	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
 
 	return bind_data;
@@ -114,9 +112,7 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 	names = bind_response->Names();
 
 	// new stuff
-	bind_data->needs_more_fetch = true;
-	D_ASSERT(bind_response->MutableResults());
-	bind_data->initial_results = std::move(bind_response->MutableResults());
+	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
 
 	return bind_data;
@@ -129,7 +125,7 @@ struct RpcLocalState : public LocalTableFunctionState {
 	//! (CTAS, COPY TO, INSERT SELECT) can run the scan in parallel without losing order.
 	optional_idx current_batch_index;
 
-	unique_ptr<ColumnDataCollection> fetched_results;
+	queue<unique_ptr<DataChunk>> results;
 	ColumnDataScanState scan_state;
 
 	explicit RpcLocalState() {
@@ -249,7 +245,7 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 		auto response_message = client->Request<PrepareResponseMessage>(
 		    make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 		bind_data.needs_more_fetch = response_message->NeedsMoreFetch();
-		bind_data.initial_results = std::move(response_message->MutableResults());
+		bind_data.results = std::move(response_message->MutableResults());
 	}
 
 	// we only multithread if there is more to fetch
@@ -259,21 +255,22 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
                                                  GlobalTableFunctionState *global_state_p) {
 	auto &bind_data = input.bind_data->CastNoConst<RpcBindData>();
+	lock_guard<mutex> guard(bind_data.lock);
 
 	auto local_state = make_uniq<RpcLocalState>();
 	// re-use initial client from bind if possible
-	if (bind_data.initial_client) { // TODO possible race here, too?
+	if (bind_data.initial_client) {
 		local_state->client = std::move(bind_data.initial_client);
 	} else {
 		local_state->client = RpcClient::GetClient(bind_data.server_uri);
 		local_state->client->SetContext(&context.client);
 	}
 
-	// TODO we probably need a lock here
-	if (bind_data.initial_results) {
-		local_state->fetched_results = std::move(bind_data.initial_results);
-		D_ASSERT(local_state->fetched_results);
-		local_state->fetched_results->InitializeScan(local_state->scan_state);
+	if (!bind_data.results.empty()) {
+		for (auto &chunk : bind_data.results) {
+			local_state->results.push(std::move(chunk));
+		}
+		bind_data.results.clear();
 	}
 	return local_state;
 }
@@ -285,27 +282,28 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 
 	while (true) {
 		// first we try to scan from our local results buffer if we have any
-		if (local_state.fetched_results) {
-			if (local_state.fetched_results->Scan(local_state.scan_state, output)) {
-				// scan succeeded, we just return
-				return;
-			}
-			local_state.fetched_results.reset();
+		if (!local_state.results.empty()) {
+			auto chunk = std::move(local_state.results.front());
+			local_state.results.pop();
+			output.Reference(*chunk);
+			output.SetCardinality(chunk->size());
+			return;
 		}
 
-		// if that did not work we request more results
-		if (!local_state.fetched_results && global_state.needs_more_fetch) {
+		// if that did not work, we request more results
+		if (local_state.results.empty() && global_state.needs_more_fetch) {
 			auto fetch_response = local_state.client->Request<FetchResponseMessage>(
 			    make_uniq<FetchRequestMessage>(bind_data.connection_id));
-			D_ASSERT(fetch_response->MutableResults());
-			if (fetch_response->MutableResults()->Count() == 0) {
+
+			if (fetch_response->MutableResults().empty()) {
 				// server is done, we are done
 				global_state.needs_more_fetch = false;
 				return;
 			}
 			// set up buffer for scan in next iteration
-			local_state.fetched_results = std::move(fetch_response->MutableResults());
-			local_state.fetched_results->InitializeScan(local_state.scan_state);
+			for (auto &chunk : fetch_response->MutableResults()) {
+				local_state.results.push(std::move(chunk));
+			}
 			local_state.current_batch_index = fetch_response->BatchIndex();
 			continue;
 		}

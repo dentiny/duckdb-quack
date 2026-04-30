@@ -129,7 +129,10 @@ void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 	serializer.WriteProperty<vector<LogicalType>>(210, "result_types", result_types);
 	serializer.WriteProperty<vector<string>>(211, "result_names", result_names);
 	serializer.WriteProperty<bool>(215, "needs_more_fetch", needs_more_fetch);
-	serializer.WriteObject(216, "results", [&](Serializer &inner) { results->Serialize(inner); });
+
+	serializer.WriteList(216, "results", results.size(), [&](Serializer::List &list, idx_t i) {
+		list.WriteObject([&](Serializer &inner) { results[i]->Serialize(inner); });
+	});
 }
 
 unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
@@ -137,9 +140,14 @@ unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &de
 	auto result_names = deserializer.ReadProperty<vector<string>>(211, "result_names");
 	auto needs_more_fetch = deserializer.ReadProperty<bool>(215, "needs_more_fetch");
 	unique_ptr<ColumnDataCollection> results_p;
-	deserializer.ReadObject(216, "results",
-	                        [&](Deserializer &inner) { results_p = ColumnDataCollection::Deserialize(inner); });
-	return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names), std::move(results_p),
+
+	vector<unique_ptr<DataChunk>> results;
+	deserializer.ReadList(216, "results", [&](Deserializer::List &list, idx_t i) {
+		auto chunk = make_uniq<DataChunk>();
+		list.ReadObject([&](Deserializer &inner) { chunk->Deserialize(inner); });
+		results.push_back(std::move(chunk));
+	});
+	return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names), std::move(results),
 	                                         needs_more_fetch);
 }
 
@@ -152,6 +160,7 @@ void FetchRequestMessage::Serialize(Serializer &serializer) const {
 unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
 	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
+
 	auto msg = make_uniq<FetchRequestMessage>(connection_id);
 	msg->SetClientQueryId(cqid);
 	return msg;
@@ -160,15 +169,21 @@ unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deser
 void FetchResponseMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<optional_idx>(253, "batch_index", batch_index);
-	D_ASSERT(results);
-	serializer.WriteObject(254, "results", [&](Serializer &inner) { results->Serialize(inner); });
+	serializer.WriteList(254, "results", results.size(), [&](Serializer::List &list, idx_t i) {
+		list.WriteObject([&](Serializer &inner) { results[i]->Serialize(inner); });
+	});
 }
 
 unique_ptr<ProtocolMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
-	unique_ptr<ColumnDataCollection> results;
 	auto batch_index = deserializer.ReadProperty<optional_idx>(253, "batch_index");
-	deserializer.ReadObject(254, "results",
-	                        [&](Deserializer &inner) { results = ColumnDataCollection::Deserialize(inner); });
+	vector<unique_ptr<DataChunk>> results;
+
+	deserializer.ReadList(254, "results", [&](Deserializer::List &list, idx_t i) {
+		auto chunk = make_uniq<DataChunk>();
+		list.ReadObject([&](Deserializer &inner) { chunk->Deserialize(inner); });
+		results.push_back(std::move(chunk));
+	});
+
 	return make_uniq<FetchResponseMessage>(std::move(results), batch_index);
 }
 

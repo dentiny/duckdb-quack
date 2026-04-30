@@ -141,9 +141,14 @@ const RpcUri &RpcCatalog::GetServerUri() {
 
 unique_ptr<ColumnDataCollection> RpcCatalog::ExecuteCommand(const string &query) {
 	// FIXME this will break with many results!
+	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
 	auto response =
 	    client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query, true));
-	return std::move(response->MutableResults());
+	chunk_collection->Initialize(response->Types());
+	for (auto &chunk : response->MutableResults()) {
+		chunk_collection->Append(*chunk);
+	}
+	return chunk_collection;
 }
 
 RpcClient &RpcCatalog::GetRawClient() {

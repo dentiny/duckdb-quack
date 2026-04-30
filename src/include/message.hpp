@@ -103,7 +103,7 @@ public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_RESPONSE;
 
 	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p,
-	                       unique_ptr<ColumnDataCollection> results_p, bool needs_more_fetch_p)
+	                       vector<unique_ptr<DataChunk>> results_p, bool needs_more_fetch_p)
 	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p), needs_more_fetch(needs_more_fetch_p),
 	      results(std::move(results_p)) {};
 
@@ -115,7 +115,7 @@ public:
 		return result_names;
 	}
 
-	unique_ptr<ColumnDataCollection> &MutableResults() {
+	vector<unique_ptr<DataChunk>> &MutableResults() {
 		return results;
 	}
 
@@ -130,7 +130,7 @@ private:
 	vector<LogicalType> result_types;
 	vector<string> result_names;
 	bool needs_more_fetch;
-	unique_ptr<ColumnDataCollection> results;
+	vector<unique_ptr<DataChunk>> results;
 };
 
 // TODO this is where auth goes
@@ -191,15 +191,15 @@ public:
 	static constexpr MessageType TYPE = MessageType::FETCH_RESPONSE;
 
 	FetchResponseMessage() : ProtocolMessage(TYPE) {};
-	explicit FetchResponseMessage(unique_ptr<ColumnDataCollection> results_p)
+	explicit FetchResponseMessage(vector<unique_ptr<DataChunk>> results_p)
 	    : ProtocolMessage(TYPE), results(std::move(results_p)) {};
-	FetchResponseMessage(unique_ptr<ColumnDataCollection> results_p, optional_idx batch_index_p)
+	FetchResponseMessage(vector<unique_ptr<DataChunk>> results_p, optional_idx batch_index_p)
 	    : ProtocolMessage(TYPE), results(std::move(results_p)), batch_index(batch_index_p) {};
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
-	unique_ptr<ColumnDataCollection> &MutableResults() {
+	vector<unique_ptr<DataChunk>> &MutableResults() {
 		return results;
 	}
 
@@ -208,7 +208,7 @@ public:
 	}
 
 private:
-	unique_ptr<ColumnDataCollection> results;
+	vector<unique_ptr<DataChunk>> results;
 	optional_idx batch_index;
 };
 

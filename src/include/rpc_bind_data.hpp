@@ -16,7 +16,8 @@ struct RpcBindData : FunctionData {
 	unique_ptr<RpcClient> initial_client;
 	vector<string> column_names;
 	vector<LogicalType> column_types;
-	unique_ptr<ColumnDataCollection> initial_results;
+	vector<unique_ptr<DataChunk>> results;
 	bool needs_more_fetch;
+	mutex lock;
 };
 } // namespace duckdb

@@ -137,21 +137,23 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	return response;
 }
 
-static unique_ptr<ColumnDataCollection> CreateBatch(Allocator &allocator, unique_ptr<QueryResult> &query_result,
-                                                    idx_t max_chunks) {
-	auto results = make_uniq<ColumnDataCollection>(allocator, query_result->types);
-	while (results->ChunkCount() < max_chunks) {
+static vector<unique_ptr<DataChunk>> CreateBatch(Allocator &allocator, unique_ptr<QueryResult> &query_result,
+                                                 idx_t max_chunks) {
+	vector<unique_ptr<DataChunk>> results;
+
+	while (results.size() < max_chunks) {
 		auto result_chunk = query_result->Fetch();
 		// error case
 		if (!result_chunk && query_result->HasError()) {
-			return nullptr;
+			results.clear();
+			return results;
 		}
 		// we are done case
 		if (!result_chunk || result_chunk->size() == 0) {
 			query_result.reset();
 			break;
 		}
-		results->Append(*result_chunk);
+		results.push_back(std::move(result_chunk));
 	}
 	return results;
 }
@@ -211,15 +213,14 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		auto types = rpc_connection->duckdb_query_result->types;
 
 		auto results = CreateBatch(Allocator::Get(*db), rpc_connection->duckdb_query_result, max_chunks_per_batch);
-		if (!results) {
-			D_ASSERT(rpc_connection->duckdb_query_result);
-			D_ASSERT(rpc_connection->duckdb_query_result->HasError());
+		if (rpc_connection->duckdb_query_result && rpc_connection->duckdb_query_result->HasError()) {
+			D_ASSERT(results.empty());
 
 			auto error_message = rpc_connection->duckdb_query_result->GetError();
 			rpc_connection->duckdb_query_result.reset();
 			return make_uniq<ErrorMessage>(error_message);
 		}
-		auto needs_more_fetch = results->ChunkCount() == max_chunks_per_batch;
+		auto needs_more_fetch = results.size() == max_chunks_per_batch;
 		return make_uniq<PrepareResponseMessage>(types, names,
 
 		                                         std::move(results), needs_more_fetch);
@@ -245,9 +246,9 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
 
 		auto results = CreateBatch(Allocator::Get(*db), rpc_connection->duckdb_query_result, max_chunks_per_batch);
-		if (!results) { // TODO this is duplicated
-			D_ASSERT(rpc_connection->duckdb_query_result);
-			D_ASSERT(rpc_connection->duckdb_query_result->HasError());
+		if (rpc_connection->duckdb_query_result &&
+		    rpc_connection->duckdb_query_result->HasError()) { // TODO this is duplicated
+			D_ASSERT(results.empty());
 			auto error_message = rpc_connection->duckdb_query_result->GetError();
 			rpc_connection->duckdb_query_result.reset();
 			return make_uniq<ErrorMessage>(error_message);
