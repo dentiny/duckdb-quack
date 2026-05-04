@@ -21,6 +21,7 @@
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
+#include "duckdb/main/extension_helper.hpp"
 
 namespace duckdb {
 

@@ -15,37 +15,25 @@ string GetUriPart(T ele) {
 	return string(ele.first, ele.afterLast - ele.first);
 }
 
-HttpsRpcClient::HttpsRpcClient(const RpcUri &uri_p) : RpcClient(uri_p) {};
+HttpsRpcClient::HttpsRpcClient(ClientContext &context, const RpcUri &uri_p) : RpcClient(context, uri_p) {};
 
 HttpsRpcClient::~HttpsRpcClient() {
-	http_client.reset();
 }
 
 unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolMessage> request_message) {
 	D_ASSERT(request_message);
-	if (!context) {
-		throw InvalidInputException("RpcClient requires a ClientContext to make requests");
-	}
 
 	lock_guard<mutex> guard(request_mutex);
 
-	auto &db = *context->db;
-	ExtensionHelper::AutoLoadExtension(db, "httpfs");
-	if (!db.ExtensionIsLoaded("httpfs")) {
-		throw MissingExtensionException("The rpc extension requires the httpfs extension to be loaded!");
-	}
+	auto &db = *context.db;
 
 	auto &http_util = HTTPUtil::Get(db);
 	auto request_url = uri.Http() + "/rpc";
 	if (!http_params) {
-		http_params = http_util.InitializeParameters(*context, request_url);
-	}
-	if (http_client) {
-		http_client->Initialize(*http_params);
+		http_params = http_util.InitializeParameters(context, request_url);
 	}
 
 	HTTPHeaders headers;
-	headers.Insert("Content-Type", "application/duckdb");
 
 	request_message->ToMemoryStream(write_stream);
 	PostRequestInfo post_request(request_url, headers, *http_params, write_stream.GetData(),
@@ -58,8 +46,7 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 	                         .count();
 
 	try {
-		// funny side-effect: Request will create (and populate) http_client if nullptr is passed
-		response = http_util.Request(post_request, http_client);
+		response = http_util.Request(post_request);
 	} catch (std::exception &e) {
 		throw IOException("Failed to send message: %s", e.what());
 	}
@@ -105,8 +92,9 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 		// Guard against reading the active query during transaction start itself
 		// (e.g. BEGIN TRANSACTION via RpcCatalog::ExecuteCommand), where the
 		// transaction isn't yet installed on the TransactionContext.
-		if (context->transaction.HasActiveTransaction()) {
-			auto raw_query_id = context->transaction.GetActiveQuery();
+
+		if (context.transaction.HasActiveTransaction()) {
+			auto raw_query_id = context.transaction.GetActiveQuery();
 			if (raw_query_id != DConstants::INVALID_INDEX) {
 				client_query_id = raw_query_id;
 				request_message->SetClientQueryId(client_query_id);
@@ -114,7 +102,7 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 		}
 
 		// Log RPC message
-		auto &logger = Logger::Get(*context);
+		auto &logger = Logger::Get(context);
 		if (logger.ShouldLog(RPCLogType::NAME, RPCLogType::LEVEL)) {
 			string error;
 			if (response_message->Type() == MessageType::ERROR) {
@@ -130,6 +118,12 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 	return response_message;
 }
 
-unique_ptr<RpcClient> RpcClient::GetClient(const RpcUri &uri) {
-	return make_uniq<HttpsRpcClient>(uri);
+unique_ptr<RpcClient> RpcClient::GetClient(ClientContext &context, const RpcUri &uri) {
+	auto &db = *context.db;
+	ExtensionHelper::AutoLoadExtension(db, "httpfs");
+	if (!db.ExtensionIsLoaded("httpfs")) {
+		throw MissingExtensionException("The rpc extension requires the httpfs extension to be loaded!");
+	}
+
+	return make_uniq<HttpsRpcClient>(context, uri);
 }

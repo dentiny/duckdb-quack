@@ -177,6 +177,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 			return make_uniq<ErrorMessage>("Invalid connection id");
 		}
 
+		// TODO do not do this if there is no fun set
 		if (!EvaluateAuthQuery(
 		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authorization_function")),
 		        Value(prepare_request_message.ConnectionId()), Value(prepare_request_message.Query()))) {

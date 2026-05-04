@@ -11,11 +11,7 @@ namespace duckdb {
 
 class RpcClient {
 public:
-	explicit RpcClient(const RpcUri &uri_p) : uri(uri_p) {};
-
-	void SetContext(optional_ptr<ClientContext> context_p) {
-		context = context_p;
-	}
+	explicit RpcClient(ClientContext &context_p, const RpcUri &uri_p) : context(context_p), uri(uri_p) {};
 
 	template <class TARGET>
 	unique_ptr<TARGET> Request(unique_ptr<ProtocolMessage> request_message) {
@@ -32,15 +28,15 @@ public:
 		return unique_ptr<TARGET>(reinterpret_cast<TARGET *>(response_message));
 	}
 
-	static unique_ptr<RpcClient> GetClient(const RpcUri &uri);
+	static unique_ptr<RpcClient> GetClient(ClientContext &context, const RpcUri &uri);
 
 	virtual ~RpcClient() {};
 
 protected:
 	mutex request_mutex;
 	MemoryStream read_stream, write_stream;
+	ClientContext &context;
 	RpcUri uri;
-	optional_ptr<ClientContext> context;
 
 private:
 	virtual unique_ptr<ProtocolMessage> RequestInternal(unique_ptr<ProtocolMessage> request_message) = 0;
@@ -48,14 +44,13 @@ private:
 
 class HttpsRpcClient : public RpcClient {
 public:
-	HttpsRpcClient(const RpcUri &uri_p);
+	HttpsRpcClient(ClientContext &context, const RpcUri &uri_p);
 	~HttpsRpcClient() override;
 
 private:
 	unique_ptr<ProtocolMessage> RequestInternal(unique_ptr<ProtocolMessage> request_message) override;
 
 private:
-	unique_ptr<HTTPClient> http_client;
 	unique_ptr<HTTPParams> http_params;
 };
 

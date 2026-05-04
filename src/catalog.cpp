@@ -76,9 +76,7 @@ void RpcTransactionManager::Checkpoint(ClientContext &context, bool force) {
 }
 
 RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p, ClientContext &context)
-    : Catalog(db_p), server_uri(server_uri_p), client(RpcClient::GetClient(server_uri)) {
-	client->SetContext(&context);
-
+    : Catalog(db_p), server_uri(server_uri_p), client(RpcClient::GetClient(context, server_uri)) {
 	// Resolve auth token: prefer a quack secret scoped to this URI; fall back to the
 	// global rpc_default_token setting.
 	string token;
