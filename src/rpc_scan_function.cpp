@@ -5,6 +5,7 @@
 #include "duckdb/function/table_function.hpp"
 #include "rpc_bind_data.hpp"
 #include "duckdb/main/database.hpp"
+#include "duckdb/main/extension_helper.hpp"
 #include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/planner/table_filter.hpp"
@@ -33,8 +34,7 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 
 	bind_data->server_uri = RpcUri(initial_uri.Uri(), enable_ssl);
 
-	bind_data->initial_client = RpcClient::GetClient(bind_data->server_uri);
-	bind_data->initial_client->SetContext(&context);
+	bind_data->initial_client = RpcClient::GetClient(context, bind_data->server_uri);
 
 	// Resolve auth token: prefer a quack secret scoped to this URI; fall back to the
 	// global rpc_default_token setting. Mirrors the logic in RpcCatalog::RpcCatalog.
@@ -240,8 +240,7 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
-		auto client = RpcClient::GetClient(bind_data.server_uri);
-		client->SetContext(&context);
+		auto client = RpcClient::GetClient(context, bind_data.server_uri);
 		auto response_message = client->Request<PrepareResponseMessage>(
 		    make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 		bind_data.needs_more_fetch = response_message->NeedsMoreFetch();
@@ -262,8 +261,7 @@ unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, Tabl
 	if (bind_data.initial_client) {
 		local_state->client = std::move(bind_data.initial_client);
 	} else {
-		local_state->client = RpcClient::GetClient(bind_data.server_uri);
-		local_state->client->SetContext(&context.client);
+		local_state->client = RpcClient::GetClient(context.client, bind_data.server_uri);
 	}
 
 	if (!bind_data.results.empty()) {

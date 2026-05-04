@@ -44,6 +44,8 @@ void HttpRpcServer::Listen(const RpcUri &uri) {
 	server->new_task_queue = [] {
 		return new duckdb_httplib::ThreadPool(128);
 	};
+	server->set_keep_alive_max_count(128);
+	server->set_keep_alive_timeout(10);
 
 	server->Get("/", [=](const duckdb_httplib::Request &, duckdb_httplib::Response &res) {
 		res.set_content("This is a DuckDB Quack RPC endpoint. Use ATTACH 'quack:...' to connect here.\n", "text/plain");

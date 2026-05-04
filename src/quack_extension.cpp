@@ -157,12 +157,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(RpcStartFunction::GetFunction());
 	loader.RegisterFunction(RpcStopFunction::GetFunction());
 
-	auto& db = loader.GetDatabaseInstance();
-	ExtensionHelper::AutoLoadExtension(db, "httpfs");
-	if (!db.ExtensionIsLoaded("httpfs")) {
-		throw MissingExtensionException("The rpc extension requires the httpfs extension to be loaded!");
-	}
-
 	// the default authentication function
 	ScalarFunction rpc_auth_token("rpc_auth_token",
 	                              {/* session id */ LogicalType::VARCHAR, /* auth string */ LogicalType::VARCHAR},
