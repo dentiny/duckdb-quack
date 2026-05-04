@@ -46,7 +46,6 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 	                         .count();
 
 	try {
-		// funny side-effect: Request will create (and populate) http_client if nullptr is passed
 		response = http_util.Request(post_request);
 	} catch (std::exception &e) {
 		throw IOException("Failed to send message: %s", e.what());
