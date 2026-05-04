@@ -1,4 +1,4 @@
-# name: test/sql/use_pragma_crash.test
+# name: test/sql/pragma_crash.test
 # description: USE on RPC catalog then PRAGMA should not crash (optional_idx with no active query)
 # group: [sql]
 
