@@ -1,19 +1,17 @@
-#include "rpc_server.hpp"
-#include "message.hpp"
-#include "rpc_log_type.hpp"
-#include "rpc_storage_extension.hpp"
-
+#include "duckdb/common/encryption_state.hpp"
+#include "duckdb/common/render_tree.hpp"
+#include "duckdb/common/types/blob.hpp"
 #include "duckdb/logging/logger.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
-#include "duckdb/common/render_tree.hpp"
-
+#include "duckdb/main/database.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/storage/temporary_file_manager.hpp"
-#include "duckdb/main/database.hpp"
 
-#include "duckdb/common/types/blob.hpp"
-#include "duckdb/common/encryption_state.hpp"
+#include "quack_server.hpp"
+#include "quack_message.hpp"
+#include "quack_log.hpp"
+#include "quack_storage.hpp"
 
 using namespace duckdb;
 

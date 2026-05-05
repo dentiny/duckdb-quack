@@ -1,4 +1,4 @@
-#include "rpc_log_type.hpp"
+#include "quack_log.hpp"
 
 namespace duckdb {
 

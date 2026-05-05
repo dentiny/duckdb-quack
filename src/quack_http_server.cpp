@@ -1,8 +1,8 @@
-#include "rpc_server.hpp"
-#include "message.hpp"
-#include "rpc_uri.hpp"
-
 #include "duckdb/common/serializer/memory_stream.hpp"
+
+#include "quack_server.hpp"
+#include "quack_message.hpp"
+#include "quack_uri.hpp"
 
 #include "httplib.hpp"
 
@@ -61,7 +61,7 @@ void HttpRpcServer::Listen(const RpcUri &uri) {
 	});
 
 	server->Post("/quack", [&](const duckdb_httplib::Request &, duckdb_httplib::Response &res,
-	                         const duckdb_httplib::ContentReader &content_reader) {
+	                           const duckdb_httplib::ContentReader &content_reader) {
 		res.set_header("Access-Control-Allow-Origin", "*");
 		MemoryStream stream;
 		content_reader([&](const char *data, size_t data_length) {

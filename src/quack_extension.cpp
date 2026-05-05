@@ -1,27 +1,23 @@
 #define DUCKDB_EXTENSION_MAIN
 
-#include "duckdb.hpp"
-
-#include "quack_extension.hpp"
-#include "rpc_log_type.hpp"
-#include "rpc_scan_function.hpp"
-#include "rpc_start_function.hpp"
-#include "rpc_storage_extension.hpp"
-#include "rpc_uri.hpp"
-
+#include "duckdb/catalog/default/default_table_functions.hpp"
 #include "duckdb/logging/log_manager.hpp"
-#include "duckdb/main/secret/secret.hpp"
-#include "duckdb/main/secret/secret_manager.hpp"
-#include "duckdb/storage/storage_extension.hpp"
-
-#include "catalog.hpp"
-#include "duckdb/parser/parser.hpp"
 #include "duckdb/main/client_context.hpp"
-#include "duckdb/main/client_data.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
-#include "duckdb/catalog/default/default_table_functions.hpp"
 #include "duckdb/main/extension_helper.hpp"
+#include "duckdb/main/secret/secret.hpp"
+#include "duckdb/main/secret/secret_manager.hpp"
+#include "duckdb/parser/parser.hpp"
+#include "duckdb/storage/storage_extension.hpp"
+
+#include "quack_catalog.hpp"
+#include "quack_extension.hpp"
+#include "quack_log.hpp"
+#include "quack_scan.hpp"
+#include "quack_startstop.hpp"
+#include "quack_storage.hpp"
+#include "quack_uri.hpp"
 
 namespace duckdb {
 
@@ -170,6 +166,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	rpc_authorization.SetVolatile();
 	loader.RegisterFunction(rpc_authorization);
 
+	// just for testing
 	ScalarFunction rpc_uri_parser("rpc_uri_parser", {/* uri */ LogicalType::VARCHAR, /* ssl */ LogicalType::BOOLEAN},
 	                              LogicalType::STRUCT({{"host", LogicalType::VARCHAR},
 	                                                   {"port", LogicalType::USMALLINT},

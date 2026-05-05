@@ -1,9 +1,8 @@
-#include "client.hpp"
-#include "rpc_uri.hpp"
-
-#include "duckdb/common/exception/http_exception.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
+
+#include "quack_client.hpp"
+#include "quack_uri.hpp"
 
 using namespace duckdb;
 

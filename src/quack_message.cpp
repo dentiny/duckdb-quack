@@ -1,7 +1,9 @@
-#include "message.hpp"
-
 #include "duckdb/catalog/catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/common/serializer/memory_stream.hpp"
+#include "duckdb/common/serializer/binary_deserializer.hpp"
+
+#include "quack_message.hpp"
 
 using namespace duckdb;
 

@@ -1,13 +1,12 @@
-#include "rpc_insert.hpp"
-
-#include "duckdb/planner/operator/logical_insert.hpp"
-#include "duckdb/planner/operator/logical_create_table.hpp"
-#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
-#include "duckdb/execution/operator/projection/physical_projection.hpp"
 #include "duckdb/execution/operator/scan/physical_table_scan.hpp"
-#include "duckdb/planner/expression/bound_cast_expression.hpp"
-#include "catalog.hpp"
-#include "message.hpp"
+#include "duckdb/planner/operator/logical_create_table.hpp"
+#include "duckdb/planner/operator/logical_insert.hpp"
+#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
+
+#include "quack_catalog.hpp"
+#include "quack_message.hpp"
+#include "quack_insert.hpp"
+#include "quack_client.hpp"
 
 using namespace duckdb;
 

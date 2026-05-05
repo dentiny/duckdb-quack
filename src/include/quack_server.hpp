@@ -1,12 +1,13 @@
 #pragma once
 
-#include "duckdb/common/optional_ptr.hpp"
-#include "duckdb/common/shared_ptr.hpp"
-#include "rpc_uri.hpp"
-
 #include <thread>
 
-#include "httplib.hpp"
+#include "duckdb/common/optional_ptr.hpp"
+#include "duckdb/common/shared_ptr.hpp"
+
+#include "quack_uri.hpp"
+
+#include "httplib.hpp" // TODO forward declare
 
 namespace duckdb {
 

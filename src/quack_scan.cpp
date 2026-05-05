@@ -1,15 +1,14 @@
-#include "rpc_scan_function.hpp"
-#include "client.hpp"
-#include "catalog.hpp"
-
 #include "duckdb/function/table_function.hpp"
-#include "rpc_bind_data.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
 #include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
-#include "duckdb/planner/table_filter.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
+#include "duckdb/planner/table_filter.hpp"
+
+#include "quack_scan.hpp"
+#include "quack_client.hpp"
+#include "quack_catalog.hpp"
 
 #include <queue>
 using namespace duckdb;

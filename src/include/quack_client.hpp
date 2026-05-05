@@ -1,11 +1,12 @@
 #pragma once
 
-#include "message.hpp"
-#include "rpc_log_type.hpp"
-#include "rpc_uri.hpp"
-
 #include "duckdb/common/http_util.hpp"
 #include "duckdb/logging/logger.hpp"
+#include "duckdb/common/serializer/memory_stream.hpp"
+
+#include "quack_message.hpp"
+#include "quack_log.hpp"
+#include "quack_uri.hpp"
 
 namespace duckdb {
 

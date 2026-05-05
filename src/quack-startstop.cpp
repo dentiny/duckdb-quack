@@ -1,8 +1,7 @@
-#include "rpc_start_function.hpp"
-#include "rpc_storage_extension.hpp"
 #include "duckdb/main/database.hpp"
 
-#include <sys/stat.h>
+#include "quack_startstop.hpp"
+#include "quack_storage.hpp"
 
 using namespace duckdb;
 

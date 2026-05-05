@@ -1,21 +1,21 @@
-#include "catalog.hpp"
-
-#include "rpc_scan_function.hpp"
-#include "rpc_bind_data.hpp"
-#include "rpc_insert.hpp"
-
+#include "duckdb/catalog/catalog_entry/table_macro_catalog_entry.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/main/connection.hpp"
+#include "duckdb/main/database.hpp"
 #include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
-#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
+#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/storage/database_size.hpp"
-#include "duckdb/catalog/catalog_entry/table_macro_catalog_entry.hpp"
-#include "duckdb/main/connection.hpp"
-#include "duckdb/main/database.hpp"
+
+#include "quack_catalog.hpp"
+#include "quack_scan.hpp"
+#include "quack_insert.hpp"
+#include "quack_message.hpp"
+#include "quack_client.hpp"
 
 // FIXME bunch of stuff copied from postgres scanner, can probably be simplified!
 

@@ -1,17 +1,18 @@
 #pragma once
 
-#include "client.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
-#include "duckdb/transaction/meta_transaction.hpp"
 #include "duckdb/transaction/transaction.hpp"
 #include "duckdb/transaction/transaction_manager.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
 
+#include "quack_uri.hpp"
+
 namespace duckdb {
 
 class RpcCatalog;
+class RpcClient;
 
 class RpcTransaction : public Transaction {
 public:

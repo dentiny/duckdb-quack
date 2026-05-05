@@ -1,8 +1,11 @@
 #pragma once
 
 #include "duckdb/storage/storage_extension.hpp"
-#include "rpc_server.hpp"
+
+#include "quack_server.hpp"
+
 namespace duckdb {
+
 class DatabaseInstance;
 
 class RpcStorageExtensionInfo : public StorageExtensionInfo {

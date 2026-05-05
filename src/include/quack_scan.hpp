@@ -1,7 +1,10 @@
 #pragma once
 
+#include "quack_uri.hpp"
+#include "quack_client.hpp"
+
 namespace duckdb {
-class RpcClient;
+
 struct RpcBindData : FunctionData {
 	bool Equals(const FunctionData &other_p) const override {
 		throw NotImplementedException("Equals not implemented");
@@ -20,4 +23,17 @@ struct RpcBindData : FunctionData {
 	bool needs_more_fetch;
 	mutex lock;
 };
+
+class TableFunction;
+
+class RpcScanFunction {
+public:
+	static TableFunction GetFunction();
+};
+
+class RpcScanByNameFunction {
+public:
+	static TableFunction GetFunction();
+};
+
 } // namespace duckdb

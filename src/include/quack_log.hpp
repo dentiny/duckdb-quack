@@ -1,7 +1,7 @@
 #pragma once
 
 #include "duckdb/logging/log_type.hpp"
-#include "message.hpp"
+#include "quack_message.hpp"
 
 namespace duckdb {
 
