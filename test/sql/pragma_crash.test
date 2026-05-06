@@ -32,7 +32,7 @@ statement ok con2
 pragma version;
 
 statement ok con1
-call rpc_stop({server});
+call quack_stop({server});
 
 endloop
 

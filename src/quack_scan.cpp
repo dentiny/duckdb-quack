@@ -30,29 +30,28 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	}
 
 	auto bind_data = make_uniq<QuackScanBindData>();
-
 	bind_data->server_uri = QuackUri(initial_uri.Uri(), enable_ssl);
-
 	bind_data->initial_client = QuackClient::GetClient(context, bind_data->server_uri);
 
 	// Resolve auth token: prefer a quack secret scoped to this URI; fall back to the
 	// global rpc_default_token setting. Mirrors the logic in QuackCatalog::QuackCatalog.
 	string token;
-	auto &secret_manager = SecretManager::Get(context);
-	auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
-	auto match = secret_manager.LookupSecret(transaction, bind_data->server_uri.Uri(), "quack");
-	if (match.HasMatch()) {
-		const auto &kv = dynamic_cast<const KeyValueSecret &>(*match.secret_entry->secret);
-		token = kv.TryGetValue("token", true).ToString();
-	} else {
-		Value default_token_val;
-		auto &config = DBConfig::GetConfig(context);
-		auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-		D_ASSERT(lookup_result_token);
-		if (default_token_val.IsNull() || default_token_val.type().id() != LogicalTypeId::VARCHAR) {
-			throw InvalidConfigurationException("No RPC token found");
+
+	if (input.named_parameters.find("token") != input.named_parameters.end()) {
+		token = input.named_parameters["token"].GetValue<string>();
+	}
+
+	if (token.empty()) {
+		auto &secret_manager = SecretManager::Get(context);
+		auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
+		auto match = secret_manager.LookupSecret(transaction, bind_data->server_uri.Uri(), "quack");
+		if (match.HasMatch()) {
+			const auto &kv = dynamic_cast<const KeyValueSecret &>(*match.secret_entry->secret);
+			token = kv.TryGetValue("token", true).ToString();
 		}
-		token = default_token_val.GetValue<string>();
+	}
+	if (token.empty()) {
+		throw InvalidInputException("Could not find a Quack authentication token");
 	}
 
 	auto connection_request_response =
@@ -60,7 +59,7 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
 	auto bind_response = bind_data->initial_client->Request<PrepareResponseMessage>(
-	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
+	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -105,7 +104,7 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	bind_data->connection_id = catalog.GetConnectionId();
 
 	auto bind_response = catalog.GetRawClient().Request<PrepareResponseMessage>(
-	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
+	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -124,7 +123,7 @@ struct QuackScanLocalState : public LocalTableFunctionState {
 	//! (CTAS, COPY TO, INSERT SELECT) can run the scan in parallel without losing order.
 	optional_idx current_batch_index;
 
-	queue<unique_ptr<DataChunk>> results;
+	queue<unique_ptr<DataChunkWrapper>> results;
 	ColumnDataScanState scan_state;
 
 	explicit QuackScanLocalState() {
@@ -240,8 +239,8 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto client = QuackClient::GetClient(context, bind_data.server_uri);
-		auto response_message = client->Request<PrepareResponseMessage>(
-		    make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
+		auto response_message =
+		    client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query));
 		bind_data.needs_more_fetch = response_message->NeedsMoreFetch();
 		bind_data.results = std::move(response_message->MutableResults());
 	}
@@ -283,7 +282,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 			auto chunk = std::move(local_state.results.front());
 			local_state.results.pop();
 
-			auto &response_chunk = *chunk;
+			auto &response_chunk = chunk->Chunk();
 			const auto &col_ids = global_state.column_ids;
 			const auto &proj_ids = global_state.projection_ids;
 			if (response_chunk.ColumnCount() == output.ColumnCount() && col_ids.empty() && proj_ids.empty()) {
@@ -307,7 +306,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 					output.data[i].Reference(response_chunk.data[src]);
 				}
 			}
-			output.SetCardinality(chunk->size());
+			output.SetCardinality(response_chunk.size());
 
 			return;
 		}
@@ -354,6 +353,8 @@ TableFunction QuackScanFunction::GetFunction() {
 	auto fun = TableFunction("quack_query", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan, QuackScanBind,
 	                         QuackScanInitGlobal, QuackScanInitLocal);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
+	fun.named_parameters["token"] = LogicalType::VARCHAR;
+
 	fun.projection_pushdown = true;
 	fun.get_partition_data = QuackScanGetPartitionData;
 	fun.to_string = QuackScanToString;

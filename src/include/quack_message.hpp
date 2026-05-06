@@ -13,11 +13,31 @@ enum class MessageType : uint8_t {
 	PREPARE_RESPONSE = 4,
 	FETCH_REQUEST = 7,
 	FETCH_RESPONSE = 8,
-	CATALOG_REQUEST = 9,
-	CATALOG_RESPONSE = 10,
-	APPEND_REQUEST = 11,
-	APPEND_RESPONSE = 12,
+	APPEND_REQUEST = 9,
+	APPEND_RESPONSE = 10,
 	ERROR_RESPONSE = 100
+};
+
+template <>
+const char *EnumUtil::ToChars<MessageType>(MessageType value);
+template <>
+MessageType EnumUtil::FromString<MessageType>(const char *value);
+
+// workaround for wrong serialization functions signature on DataChunk :/
+// TODO: remove in 2.0
+class DataChunkWrapper {
+public:
+	DataChunkWrapper(DataChunk &chunk_p) {
+		chunk.Reference(chunk_p);
+	}
+	DataChunk &Chunk() {
+		return chunk;
+	}
+	void Serialize(Serializer &serializer) const;
+	static unique_ptr<DataChunkWrapper> Deserialize(Deserializer &deserializer);
+
+private:
+	DataChunk chunk;
 };
 
 string MessageTypeToString(MessageType type);
@@ -29,7 +49,7 @@ public:
 
 	template <class TARGET>
 	TARGET &Cast() {
-		if (message_type != TARGET::TYPE) {
+		if (type != TARGET::TYPE) {
 			throw InternalException("Failed to cast message to type - message type mismatch");
 		}
 		return reinterpret_cast<TARGET &>(*this);
@@ -37,7 +57,7 @@ public:
 
 	template <class TARGET>
 	const TARGET &Cast() const {
-		if (message_type != TARGET::TYPE) {
+		if (type != TARGET::TYPE) {
 			throw InternalException("Failed to cast message to type - message type mismatch");
 		}
 		return reinterpret_cast<const TARGET &>(*this);
@@ -47,7 +67,7 @@ public:
 	static unique_ptr<QuackMessage> Deserialize(Deserializer &deserializer);
 
 	const MessageType &Type() const {
-		return message_type;
+		return type;
 	}
 
 	optional_idx ClientQueryId() const {
@@ -62,9 +82,9 @@ public:
 	}
 
 protected:
-	explicit QuackMessage(MessageType type) : message_type(type) {
+	explicit QuackMessage(MessageType type) : type(type) {
 	}
-	MessageType message_type = MessageType::INVALID;
+	MessageType type = MessageType::INVALID;
 	optional_idx client_query_id;
 };
 
@@ -72,9 +92,8 @@ class PrepareRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_REQUEST;
 
-	PrepareRequestMessage(const string &connection_id_p, const string &sql_query_p, bool immediately_execute_p = false)
-	    : QuackMessage(TYPE), connection_id(connection_id_p), sql_query(sql_query_p),
-	      immediately_execute(immediately_execute_p) {
+	PrepareRequestMessage(const string &connection_id_p, const string &sql_query_p)
+	    : QuackMessage(TYPE), connection_id(connection_id_p), sql_query(sql_query_p) {
 	}
 	const std::string &Query() const {
 		return sql_query;
@@ -86,14 +105,9 @@ public:
 		return connection_id;
 	}
 
-	bool ImmediatelyExecute() const {
-		return immediately_execute;
-	}
-
 private:
 	string connection_id; // FIXME abstract this to some superclass
 	string sql_query;
-	bool immediately_execute;
 };
 
 class PrepareResponseMessage : public QuackMessage {
@@ -101,7 +115,7 @@ public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_RESPONSE;
 
 	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p,
-	                       vector<unique_ptr<DataChunk>> results_p, bool needs_more_fetch_p)
+	                       vector<unique_ptr<DataChunkWrapper>> results_p, bool needs_more_fetch_p)
 	    : QuackMessage(TYPE), result_types(types_p), result_names(names_p), needs_more_fetch(needs_more_fetch_p),
 	      results(std::move(results_p)) {};
 
@@ -113,7 +127,7 @@ public:
 		return result_names;
 	}
 
-	vector<unique_ptr<DataChunk>> &MutableResults() {
+	vector<unique_ptr<DataChunkWrapper>> &MutableResults() {
 		return results;
 	}
 
@@ -127,8 +141,8 @@ public:
 private:
 	vector<LogicalType> result_types;
 	vector<string> result_names;
+	vector<unique_ptr<DataChunkWrapper>> results;
 	bool needs_more_fetch;
-	vector<unique_ptr<DataChunk>> results;
 };
 
 // TODO this is where auth goes
@@ -177,8 +191,6 @@ public:
 	}
 	explicit FetchRequestMessage(const string &connection_id_p) : QuackMessage(TYPE), connection_id(connection_id_p) {};
 
-	// TODO what was this for again?
-	// TODO contain the query ref
 private:
 	string connection_id;
 };
@@ -188,15 +200,15 @@ public:
 	static constexpr MessageType TYPE = MessageType::FETCH_RESPONSE;
 
 	FetchResponseMessage() : QuackMessage(TYPE) {};
-	explicit FetchResponseMessage(vector<unique_ptr<DataChunk>> results_p)
+	explicit FetchResponseMessage(vector<unique_ptr<DataChunkWrapper>> results_p)
 	    : QuackMessage(TYPE), results(std::move(results_p)) {};
-	FetchResponseMessage(vector<unique_ptr<DataChunk>> results_p, optional_idx batch_index_p)
+	FetchResponseMessage(vector<unique_ptr<DataChunkWrapper>> results_p, optional_idx batch_index_p)
 	    : QuackMessage(TYPE), results(std::move(results_p)), batch_index(batch_index_p) {};
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<QuackMessage> Deserialize(Deserializer &deserializer);
 
-	vector<unique_ptr<DataChunk>> &MutableResults() {
+	vector<unique_ptr<DataChunkWrapper>> &MutableResults() {
 		return results;
 	}
 
@@ -205,7 +217,7 @@ public:
 	}
 
 private:
-	vector<unique_ptr<DataChunk>> results;
+	vector<unique_ptr<DataChunkWrapper>> results;
 	optional_idx batch_index;
 };
 
@@ -223,57 +235,19 @@ static unique_ptr<ParseInfo> ParseInfoCopy(ParseInfo &parse_info) {
 	}
 }
 
-class CatalogRequestMessage : public QuackMessage {
-public:
-	static constexpr MessageType TYPE = MessageType::CATALOG_REQUEST;
-
-	explicit CatalogRequestMessage(const string &connection_id_p, unique_ptr<ParseInfo> parse_info_p)
-	    : QuackMessage(TYPE), connection_id(connection_id_p), parse_info(std::move(parse_info_p)) {};
-
-	void Serialize(Serializer &serializer) const override;
-	static unique_ptr<QuackMessage> Deserialize(Deserializer &deserializer);
-	unique_ptr<ParseInfo> GetParseInfo() const {
-		return ParseInfoCopy(*parse_info);
-	}
-	const std::string &ConnectionId() const {
-		return connection_id;
-	}
-
-private:
-	string connection_id;
-	unique_ptr<ParseInfo> parse_info;
-};
-
-class CatalogResponseMessage : public QuackMessage {
-public:
-	static constexpr MessageType TYPE = MessageType::CATALOG_RESPONSE;
-
-	explicit CatalogResponseMessage(unique_ptr<ParseInfo> parse_info_p)
-	    : QuackMessage(TYPE), parse_info(std::move(parse_info_p)) {};
-
-	void Serialize(Serializer &serializer) const override;
-	static unique_ptr<QuackMessage> Deserialize(Deserializer &deserializer);
-	unique_ptr<ParseInfo> GetParseInfo() const {
-		return ParseInfoCopy(*parse_info);
-	}
-
-private:
-	unique_ptr<ParseInfo> parse_info;
-};
-
 class AppendRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::APPEND_REQUEST;
 
 	explicit AppendRequestMessage(const string &connection_id_p, const string &schema_name_p,
-	                              const string &table_name_p, unique_ptr<DataChunk> append_chunk_p)
+	                              const string &table_name_p, unique_ptr<DataChunkWrapper> append_chunk_p)
 	    : QuackMessage(TYPE), connection_id(connection_id_p), schema_name(schema_name_p), table_name(table_name_p),
 	      append_chunk(std::move(append_chunk_p)) {};
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<QuackMessage> Deserialize(Deserializer &deserializer);
 	DataChunk &AppendChunk() const {
-		return *append_chunk;
+		return append_chunk->Chunk();
 	}
 	const std::string &ConnectionId() const {
 		return connection_id;
@@ -289,7 +263,7 @@ private:
 	string connection_id;
 	string schema_name;
 	string table_name;
-	unique_ptr<DataChunk> append_chunk;
+	unique_ptr<DataChunkWrapper> append_chunk;
 };
 
 class AppendResponseMessage : public QuackMessage {
@@ -305,10 +279,10 @@ public:
 class ErrorMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::ERROR_RESPONSE;
-	explicit ErrorMessage(const string &error_message_p) : QuackMessage(TYPE), error_message(error_message_p) {
+	explicit ErrorMessage(const string &message_p) : QuackMessage(TYPE), message(message_p) {
 	}
 	const std::string &Error() const {
-		return error_message;
+		return message;
 	}
 
 	void Serialize(Serializer &serializer) const override;
@@ -316,7 +290,7 @@ public:
 
 private:
 	ErrorMessage() : QuackMessage(TYPE) {};
-	string error_message;
+	string message;
 };
 
 } // namespace duckdb

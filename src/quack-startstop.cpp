@@ -12,6 +12,7 @@ struct QuackStartStopFunctionData : public TableFunctionData {
 	bool finished = false;
 	bool auth_is_default = false;
 	QuackUri listen_uri;
+	string token;
 };
 
 static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunctionBindInput &input,
@@ -45,6 +46,11 @@ static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunc
 	    lookup_result_token && !default_auth_val.IsNull() && default_auth_val.GetValue<string>() == "quack_check_token";
 
 	if (bind_data->auth_is_default) {
+		if (input.named_parameters.find("token") != input.named_parameters.end()) {
+			bind_data->token = input.named_parameters["token"].GetValue<string>();
+		} else {
+			// TODO
+		}
 		return_types.emplace_back(LogicalType::VARCHAR);
 		names.emplace_back("auth_token");
 	}
@@ -58,26 +64,12 @@ static void QuackServe(ClientContext &context, TableFunctionInput &data_p, DataC
 		return;
 	}
 
-	auto &server = QuackStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_uri);
+	auto &server =
+	    QuackStorageExtensionInfo::GetState(*context.db).CreateServer(context, bind_data.listen_uri, bind_data.token);
 	output.SetValue(0, 0, bind_data.listen_uri.Uri());
 	output.SetValue(1, 0, bind_data.listen_uri.Http());
-
-	// generate default token if not set
 	if (bind_data.auth_is_default) {
-		Value default_token_val;
-		auto &config = DBConfig::GetConfig(context);
-
-		// TODO there could be a race condition here, lock this
-		auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-		if (default_token_val.IsNull()) {
-			config.SetOptionByName("rpc_default_token", Value(server.GenerateSessionId()));
-		}
-
-		lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-		D_ASSERT(lookup_result_token);
-		D_ASSERT(!default_token_val.IsNull());
-		D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
-		output.SetValue(2, 0, default_token_val.GetValue<string>());
+		output.SetValue(2, 0, bind_data.token);
 	}
 
 	output.SetCardinality(1);
@@ -88,6 +80,8 @@ TableFunction QuackServeFunction::GetFunction() {
 	auto fun = TableFunction("quack_serve", {LogicalType::VARCHAR}, QuackServe, QuackServeBind);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.named_parameters["allow_other_hostname"] = LogicalType::BOOLEAN;
+	fun.named_parameters["token"] = LogicalType::VARCHAR;
+
 	return fun;
 }
 
@@ -122,5 +116,5 @@ static void QuackStop(ClientContext &context, TableFunctionInput &data_p, DataCh
 }
 
 TableFunction QuackStopFunction::GetFunction() {
-	return TableFunction("rpc_stop", {LogicalType::VARCHAR}, QuackStop, QuackStopBind);
+	return TableFunction("quack_stop", {LogicalType::VARCHAR}, QuackStop, QuackStopBind);
 }

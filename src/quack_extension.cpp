@@ -18,6 +18,7 @@
 #include "quack_startstop.hpp"
 #include "quack_storage.hpp"
 #include "quack_uri.hpp"
+#include "include/quack_storage.hpp"
 #include "include/quack_uri.hpp"
 
 namespace duckdb {
@@ -58,14 +59,18 @@ static void RegisterQuackSecretType(ExtensionLoader &loader) {
 // pass session id
 static void QuackAuthToken(const DataChunk &args, ExpressionState &state, Vector &result) {
 	auto auth_str = args.GetValue(1, 0).GetValue<string>();
-	Value default_token_val;
-	auto &config = DBConfig::GetConfig(state.GetContext());
-	auto lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-	D_ASSERT(lookup_result);
-	D_ASSERT(!default_token_val.IsNull());
-	D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
-	auto default_token = default_token_val.GetValue<string>();
-	result.SetValue(0, Value(auth_str == default_token));
+
+	auto &quack_state = QuackStorageExtensionInfo::GetState(*state.GetContext().db);
+	//
+	// auto lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+	// D_ASSERT(lookup_result);
+	// D_ASSERT(!default_token_val.IsNull());
+	// D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
+	// auto default_token = default_token_val.GetValue<string>();
+
+	// result.SetValue(0, Value(auth_str == default_token));
+
+	result.SetValue(0, Value::BOOLEAN(true));
 }
 
 static void QuackDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
@@ -139,10 +144,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          LogicalType::VARCHAR, Value("quack_check_token"));
 	config.AddExtensionOption("quack_authorization_function", "Name of a callback function for authorization",
 	                          LogicalType::VARCHAR, Value("quack_nop_authorization"));
-
-	// TODO make this readonly from SQL?
-	config.AddExtensionOption("rpc_default_token", "Authorization token used by default", LogicalType::VARCHAR, Value(),
-	                          nullptr, SetScope::GLOBAL);
 
 	config.AddExtensionOption("quack_fetch_batch_chunks", "Maximum number of DataChunks returned per FETCH response",
 	                          LogicalType::UBIGINT, Value::UBIGINT(12));

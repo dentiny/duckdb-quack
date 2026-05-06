@@ -17,14 +17,15 @@ QuackStorageExtensionInfo &QuackStorageExtensionInfo::GetState(const DatabaseIns
 	return *static_cast<QuackStorageExtensionInfo *>(ext->storage_info.get());
 }
 
-QuackServer &QuackStorageExtensionInfo::FindOrCreateServer(ClientContext &context, const QuackUri &listen_uri) {
+QuackServer &QuackStorageExtensionInfo::CreateServer(ClientContext &context, const QuackUri &listen_uri,
+                                                     const string &token) {
 	std::lock_guard<std::mutex> lock(servers_mutex);
 	auto it = servers.find(listen_uri.Uri());
 	if (it != servers.end()) {
-		return *it->second;
+		throw InvalidInputException("Server already exists for %s", listen_uri.Uri());
 	}
 	unique_ptr<QuackServer> server;
-	server = make_uniq<HttpQuackServer>(context);
+	server = make_uniq<HttpQuackServer>(context, token);
 	server->Listen(listen_uri);
 	servers.emplace(listen_uri.Uri(), std::move(server));
 	return *servers[listen_uri.Uri()];
@@ -42,7 +43,7 @@ bool QuackStorageExtensionInfo::StopServer(ClientContext &context, const QuackUr
 		servers.erase(it);
 	}
 	// Synchronously free the listening port so that clients racing a subsequent
-	// connect() after rpc_stop observe a real refusal rather than a stale socket.
+	// connect() after quack_stop observe a real refusal rather than a stale socket.
 	to_destroy->Close();
 	// Full destruction (httplib worker-pool join) runs off-thread so that when
 	// quack_stop is invoked from inside one of the server's own worker threads

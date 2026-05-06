@@ -75,4 +75,4 @@ statement ok con2
 detach r;
 
 statement ok con1
-call rpc_stop('quack:localhost');
+call quack_stop('quack:localhost');

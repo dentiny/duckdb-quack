@@ -36,6 +36,6 @@ statement ok con2
 detach rpc;
 
 statement ok con1
-call rpc_stop({server});
+call quack_stop({server});
 
 endloop

@@ -19,7 +19,7 @@ struct QuackScanBindData : FunctionData {
 	unique_ptr<QuackClient> initial_client;
 	vector<string> column_names;
 	vector<LogicalType> column_types;
-	vector<unique_ptr<DataChunk>> results;
+	vector<unique_ptr<DataChunkWrapper>> results;
 	bool needs_more_fetch;
 	mutex lock;
 };

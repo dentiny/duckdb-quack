@@ -56,4 +56,4 @@ select count(*) from duckdb_logs where type = 'Quack' and scope = 'CONNECTION'
 
 
 statement ok con1
-call rpc_stop('quack:localhost');
+call quack_stop('quack:localhost');
