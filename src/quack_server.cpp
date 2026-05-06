@@ -1,29 +1,27 @@
-#include "rpc_server.hpp"
-#include "message.hpp"
-#include "rpc_log_type.hpp"
-#include "rpc_storage_extension.hpp"
-
+#include "duckdb/common/encryption_state.hpp"
+#include "duckdb/common/render_tree.hpp"
+#include "duckdb/common/types/blob.hpp"
 #include "duckdb/logging/logger.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
-#include "duckdb/common/render_tree.hpp"
-
+#include "duckdb/main/database.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/storage/temporary_file_manager.hpp"
-#include "duckdb/main/database.hpp"
 
-#include "duckdb/common/types/blob.hpp"
-#include "duckdb/common/encryption_state.hpp"
+#include "quack_server.hpp"
+#include "quack_message.hpp"
+#include "quack_log.hpp"
+#include "quack_storage.hpp"
 
 using namespace duckdb;
 
-RpcServer::RpcServer(ClientContext &context_p) : db(context_p.db) {
+QuackServer::QuackServer(ClientContext &context_p) : db(context_p.db) {
 }
 
-RpcServer::~RpcServer() {
+QuackServer::~QuackServer() {
 }
 
-optional_ptr<RpcConnection> RpcServer::GetConnection(const string &connection_id) {
+optional_ptr<QuackConnection> QuackServer::GetConnection(const string &connection_id) {
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
 	auto it = active_connections.find(connection_id);
 	if (it != active_connections.end()) {
@@ -32,12 +30,12 @@ optional_ptr<RpcConnection> RpcServer::GetConnection(const string &connection_id
 	return nullptr;
 }
 
-string RpcServer::CreateNewConnection(const string &session_id) {
+string QuackServer::CreateNewConnection(const string &session_id) {
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
 
 	D_ASSERT(active_connections.find(session_id) == active_connections.end());
 
-	auto new_connection = make_uniq<RpcConnection>();
+	auto new_connection = make_uniq<QuackConnection>();
 	new_connection->duckdb_connection = make_uniq<Connection>(*db);
 	new_connection->duckdb_connection->context->config.enable_progress_bar = false;
 	// new_connection->duckdb_connection->context->config.streaming_buffer_size = 10 * 1000000; // 10 MB
@@ -71,7 +69,7 @@ static bool EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... v
 	return true;
 }
 
-string RpcServer::GenerateSessionId() {
+string QuackServer::GenerateSessionId() {
 	constexpr idx_t kSessionIdBytes = 16; // 128 bits
 
 	{
@@ -96,7 +94,7 @@ string RpcServer::GenerateSessionId() {
 }
 
 // Extract connection_id from a message if available
-static string ExtractConnectionId(ProtocolMessage &msg) {
+static string ExtractConnectionId(QuackMessage &msg) {
 	switch (msg.Type()) {
 	case MessageType::PREPARE_REQUEST:
 		return msg.Cast<PrepareRequestMessage>().ConnectionId();
@@ -111,11 +109,11 @@ static string ExtractConnectionId(ProtocolMessage &msg) {
 	}
 }
 
-static optional_idx ExtractClientQueryId(ProtocolMessage &msg) {
+static optional_idx ExtractClientQueryId(QuackMessage &msg) {
 	return msg.ClientQueryId();
 }
 
-static string ExtractQuery(ProtocolMessage &msg) {
+static string ExtractQuery(QuackMessage &msg) {
 	if (msg.Type() == MessageType::PREPARE_REQUEST) {
 		return msg.Cast<PrepareRequestMessage>().Query();
 	}
@@ -123,16 +121,16 @@ static string ExtractQuery(ProtocolMessage &msg) {
 }
 
 // main switcheroo happens here
-unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_message) {
+unique_ptr<QuackMessage> QuackServer::HandleMessage(QuackMessage &received_message) {
 	auto &logger = Logger::Get(*db);
-	bool should_log = logger.ShouldLog(RPCLogType::NAME, RPCLogType::LEVEL);
+	bool should_log = logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL);
 
-	string rpc_connection_id;
+	string connection_id;
 	string query;
 	optional_idx client_query_id;
 	int64_t start_time = 0;
 	if (should_log) {
-		rpc_connection_id = ExtractConnectionId(received_message);
+		connection_id = ExtractConnectionId(received_message);
 		client_query_id = ExtractClientQueryId(received_message);
 		query = ExtractQuery(received_message);
 		start_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
@@ -147,12 +145,12 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		                       .time_since_epoch()
 		                       .count();
 		string error;
-		if (response->Type() == MessageType::ERROR) {
+		if (response->Type() == MessageType::ERROR_RESPONSE) {
 			error = response->Cast<ErrorMessage>().Error();
 		}
-		auto msg = RPCLogType::ConstructLogMessage(received_message.Type(), rpc_connection_id, client_query_id, query,
-		                                           "", end_time - start_time, response->Type(), error);
-		logger.WriteLog(RPCLogType::NAME, RPCLogType::LEVEL, msg);
+		auto msg = QuackLogType::ConstructLogMessage(received_message.Type(), connection_id, client_query_id, query, "",
+		                                             end_time - start_time, response->Type(), error);
+		logger.WriteLog(QuackLogType::NAME, QuackLogType::LEVEL, msg);
 	}
 
 	return response;
@@ -179,13 +177,13 @@ static vector<unique_ptr<DataChunk>> CreateBatch(Allocator &allocator, unique_pt
 	return results;
 }
 
-unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &received_message) {
+unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &received_message) {
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
 		string session_id = GenerateSessionId();
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authentication_function")),
+		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authentication_function")),
 		        Value(session_id), Value(connection_request_message.AuthString()))) {
 			return make_uniq<ErrorMessage>("Authentication failed");
 		}
@@ -193,27 +191,27 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 	}
 	case MessageType::PREPARE_REQUEST: {
 		auto &prepare_request_message = received_message.Cast<PrepareRequestMessage>();
-		optional_ptr<RpcConnection> rpc_connection = GetConnection(prepare_request_message.ConnectionId());
-		if (!rpc_connection) {
+		optional_ptr<QuackConnection> connection = GetConnection(prepare_request_message.ConnectionId());
+		if (!connection) {
 			return make_uniq<ErrorMessage>("Invalid connection id");
 		}
 
 		// TODO do not do this if there is no fun set
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authorization_function")),
+		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authorization_function")),
 		        Value(prepare_request_message.ConnectionId()), Value(prepare_request_message.Query()))) {
 			return make_uniq<ErrorMessage>("Authorization failed");
 		}
 
-		std::unique_lock<std::mutex> lock(rpc_connection->lock);
-		rpc_connection->duckdb_query_result.reset();
+		std::unique_lock<std::mutex> lock(connection->lock);
+		connection->duckdb_query_result.reset();
 
 		if (!prepare_request_message.ImmediatelyExecute()) {
 			return make_uniq<ErrorMessage>("EEEK");
 		}
 
 		{
-			auto query_result = rpc_connection->duckdb_connection->SendQuery(prepare_request_message.Query());
+			auto query_result = connection->duckdb_connection->SendQuery(prepare_request_message.Query());
 			if (query_result->HasError()) {
 				return make_uniq<ErrorMessage>(query_result->GetError());
 			}
@@ -221,25 +219,25 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 				return make_uniq<ErrorMessage>("Query did not return any columns");
 			}
 
-			rpc_connection->duckdb_query_result = std::move(query_result);
+			connection->duckdb_query_result = std::move(query_result);
 		}
 		// Fresh query → restart batch numbering. Clients' local state is re-initialized on
 		// a new PREPARE, so indices start at 0 again.
-		rpc_connection->next_batch_index = 0;
+		connection->next_batch_index = 0;
 
 		Value max_chunks_val;
 		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
 		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
 
-		auto names = rpc_connection->duckdb_query_result->names;
-		auto types = rpc_connection->duckdb_query_result->types;
+		auto names = connection->duckdb_query_result->names;
+		auto types = connection->duckdb_query_result->types;
 
-		auto results = CreateBatch(Allocator::Get(*db), rpc_connection->duckdb_query_result, max_chunks_per_batch);
-		if (rpc_connection->duckdb_query_result && rpc_connection->duckdb_query_result->HasError()) {
+		auto results = CreateBatch(Allocator::Get(*db), connection->duckdb_query_result, max_chunks_per_batch);
+		if (connection->duckdb_query_result && connection->duckdb_query_result->HasError()) {
 			D_ASSERT(results.empty());
 
-			auto error_message = rpc_connection->duckdb_query_result->GetError();
-			rpc_connection->duckdb_query_result.reset();
+			auto error_message = connection->duckdb_query_result->GetError();
+			connection->duckdb_query_result.reset();
 			return make_uniq<ErrorMessage>(error_message);
 		}
 		auto needs_more_fetch = results.size() == max_chunks_per_batch;
@@ -250,43 +248,42 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 
 	case MessageType::FETCH_REQUEST: {
 		auto &fetch_request_message = received_message.Cast<FetchRequestMessage>();
-		optional_ptr<RpcConnection> rpc_connection = GetConnection(fetch_request_message.ConnectionId());
-		if (!rpc_connection) {
+		optional_ptr<QuackConnection> connection = GetConnection(fetch_request_message.ConnectionId());
+		if (!connection) {
 			return make_uniq<ErrorMessage>("Invalid connection id");
 		}
-		std::unique_lock<std::mutex> lock(rpc_connection->lock);
+		std::unique_lock<std::mutex> lock(connection->lock);
 
-		if (!rpc_connection->duckdb_query_result) {
+		if (!connection->duckdb_query_result) {
 			return make_uniq<FetchResponseMessage>();
 		}
-		if (rpc_connection->duckdb_query_result->HasError()) {
-			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
+		if (connection->duckdb_query_result->HasError()) {
+			return make_uniq<ErrorMessage>(connection->duckdb_query_result->GetError());
 		}
 
 		Value max_chunks_val;
 		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
 		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
 
-		auto results = CreateBatch(Allocator::Get(*db), rpc_connection->duckdb_query_result, max_chunks_per_batch);
-		if (rpc_connection->duckdb_query_result &&
-		    rpc_connection->duckdb_query_result->HasError()) { // TODO this is duplicated
+		auto results = CreateBatch(Allocator::Get(*db), connection->duckdb_query_result, max_chunks_per_batch);
+		if (connection->duckdb_query_result && connection->duckdb_query_result->HasError()) { // TODO this is duplicated
 			D_ASSERT(results.empty());
-			auto error_message = rpc_connection->duckdb_query_result->GetError();
-			rpc_connection->duckdb_query_result.reset();
+			auto error_message = connection->duckdb_query_result->GetError();
+			connection->duckdb_query_result.reset();
 			return make_uniq<ErrorMessage>(error_message);
 		}
-		auto assigned_batch_index = rpc_connection->next_batch_index++;
+		auto assigned_batch_index = connection->next_batch_index++;
 		return make_uniq<FetchResponseMessage>(std::move(results), optional_idx(assigned_batch_index));
 	}
 
 	case MessageType::CATALOG_REQUEST: {
 		auto &catalog_request_message = received_message.Cast<CatalogRequestMessage>();
-		optional_ptr<RpcConnection> rpc_connection = GetConnection(catalog_request_message.ConnectionId());
-		if (!rpc_connection) {
+		optional_ptr<QuackConnection> connection = GetConnection(catalog_request_message.ConnectionId());
+		if (!connection) {
 			return make_uniq<ErrorMessage>("Invalid connection id");
 		}
-		std::unique_lock<std::mutex> lock(rpc_connection->lock);
-		auto &context = *rpc_connection->duckdb_connection->context;
+		std::unique_lock<std::mutex> lock(connection->lock);
+		auto &context = *connection->duckdb_connection->context;
 
 		// FIXME handle other types!
 		auto parse_info = catalog_request_message.GetParseInfo();
@@ -336,13 +333,13 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 	}
 	case MessageType::APPEND_REQUEST: {
 		auto &append_request_message = received_message.Cast<AppendRequestMessage>();
-		optional_ptr<RpcConnection> rpc_connection = GetConnection(append_request_message.ConnectionId());
-		std::unique_lock<std::mutex> lock(rpc_connection->lock);
-		auto &context = *rpc_connection->duckdb_connection->context;
+		optional_ptr<QuackConnection> connection = GetConnection(append_request_message.ConnectionId());
+		std::unique_lock<std::mutex> lock(connection->lock);
+		auto &context = *connection->duckdb_connection->context;
 		auto table_info = context.TableInfo(append_request_message.SchemaName(), append_request_message.TableName());
 		ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
 		collection.Append(append_request_message.AppendChunk());
-		rpc_connection->duckdb_connection->Append(*table_info, collection);
+		connection->duckdb_connection->Append(*table_info, collection);
 		return make_uniq<AppendResponseMessage>();
 	}
 	default: {

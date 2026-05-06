@@ -4,13 +4,14 @@ namespace duckdb {
 
 class TableFunction;
 
-class RpcScanFunction {
+class QuackServeFunction {
 public:
 	static TableFunction GetFunction();
 };
 
-class RpcScanByNameFunction {
+class QuackStopFunction {
 public:
 	static TableFunction GetFunction();
 };
+
 } // namespace duckdb

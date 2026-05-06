@@ -12,7 +12,11 @@ project(${TARGET_NAME})
 
 include_directories(src/include duckdb/third_party/httplib duckdb/extension/autocomplete/include)
 
-set(EXTENSION_SOURCES src/quack_extension.cpp src/rpc_server.cpp src/http_rpc_server.cpp src/message.cpp src/client.cpp src/rpc_scan_function.cpp src/rpc_start_function.cpp src/rpc_storage_extension.cpp  src/catalog.cpp src/rpc_insert.cpp src/rpc_log_type.cpp)
+set(EXTENSION_SOURCES
+        src/quack-startstop.cpp   src/quack_extension.cpp   src/quack_log.cpp         src/quack_server.cpp
+        src/quack_catalog.cpp     src/quack_http_server.cpp src/quack_message.cpp     src/quack_storage.cpp
+        src/quack_client.cpp      src/quack_insert.cpp      src/quack_scan.cpp src/quack_uri.cpp
+)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})

@@ -25,20 +25,20 @@ statement ok
 set rpc_default_token='asdf'
 
 statement ok con1
-call rpc_start('quack:localhost');
+call quack_serve('quack:localhost');
 
 statement ok con2
 attach 'quack:localhost' as rpc
 
 
 statement ok con2
-CALL enable_logging('RPC');
+CALL enable_logging('Quack');
 
 
 loop i 0 10
 
 statement ok con2
-from rpc.call('
+from rpc.query('
 UPDATE pgbench_accounts SET abalance = abalance + 2655 WHERE aid = 5445192;
 SELECT abalance FROM pgbench_accounts WHERE aid = 5445192;
 UPDATE pgbench_tellers SET tbalance = tbalance + 2655 WHERE tid = 120;
@@ -50,7 +50,7 @@ endloop
 
 # we send 100 times 7 queries, so 700 messages
 query I con2
-select count(*) from duckdb_logs where type = 'RPC' and scope = 'CONNECTION'
+select count(*) from duckdb_logs where type = 'Quack' and scope = 'CONNECTION'
 ----
 30
 

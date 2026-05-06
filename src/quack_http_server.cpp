@@ -1,14 +1,14 @@
-#include "rpc_server.hpp"
-#include "message.hpp"
-#include "rpc_uri.hpp"
-
 #include "duckdb/common/serializer/memory_stream.hpp"
+
+#include "quack_server.hpp"
+#include "quack_message.hpp"
+#include "quack_uri.hpp"
 
 #include "httplib.hpp"
 
 using namespace duckdb;
 
-void HttpRpcServer::Close() {
+void HttpQuackServer::Close() {
 	// Stops accepting new connections and joins the listener threads (NOT the
 	// httplib worker pool)
 	server->stop();
@@ -22,18 +22,18 @@ void HttpRpcServer::Close() {
 	}
 }
 
-HttpRpcServer::~HttpRpcServer() {
+HttpQuackServer::~HttpQuackServer() {
 	Close();
 }
 
-void HttpRpcServer::ListenThread(HttpRpcServer *rpc_server, const string &listen_host, int listen_port) {
-	D_ASSERT(rpc_server);
-	D_ASSERT(rpc_server->server);
+void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port) {
+	D_ASSERT(connection_id);
+	D_ASSERT(server->server);
 	D_ASSERT(listen_port > 1 && listen_port < 65535);
-	rpc_server->server->listen(listen_host, listen_port);
+	server->server->listen(listen_host, listen_port);
 }
 
-void HttpRpcServer::Listen(const RpcUri &uri) {
+void HttpQuackServer::Listen(const QuackUri &uri) {
 	server = make_uniq<duckdb_httplib::Server>();
 
 	// Each keep-alive connection holds a server thread for its lifetime.
@@ -61,14 +61,14 @@ void HttpRpcServer::Listen(const RpcUri &uri) {
 	});
 
 	server->Post("/quack", [&](const duckdb_httplib::Request &, duckdb_httplib::Response &res,
-	                         const duckdb_httplib::ContentReader &content_reader) {
+	                           const duckdb_httplib::ContentReader &content_reader) {
 		res.set_header("Access-Control-Allow-Origin", "*");
 		MemoryStream stream;
 		content_reader([&](const char *data, size_t data_length) {
 			stream.WriteData((data_ptr_t)data, data_length);
 			return true;
 		});
-		HandleMessage(*ProtocolMessage::FromMemoryStream(stream))->ToMemoryStream(stream);
+		HandleMessage(*QuackMessage::FromMemoryStream(stream))->ToMemoryStream(stream);
 		res.set_content((const char *)stream.GetData(), stream.GetPosition(), "application/duckdb");
 	});
 
