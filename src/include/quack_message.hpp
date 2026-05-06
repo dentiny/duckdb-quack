@@ -28,6 +28,7 @@ MessageType EnumUtil::FromString<MessageType>(const char *value);
 class DataChunkWrapper {
 public:
 	DataChunkWrapper(DataChunk &chunk_p) {
+		chunk.InitializeEmpty(chunk_p.GetTypes());
 		chunk.Reference(chunk_p);
 	}
 	DataChunk &Chunk() {

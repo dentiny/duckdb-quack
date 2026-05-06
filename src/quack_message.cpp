@@ -93,8 +93,11 @@ unique_ptr<QuackMessage> QuackMessage::FromMemoryStream(MemoryStream &read_strea
 }
 
 void DataChunkWrapper::Serialize(Serializer &serializer) const {
+	serializer.WriteObject(300, "chunk", [&](Serializer &inner) { chunk.Serialize(inner); });
 }
 
 unique_ptr<DataChunkWrapper> DataChunkWrapper::Deserialize(Deserializer &deserializer) {
-	return nullptr;
+	DataChunk chunk;
+	deserializer.ReadObject(300, "chunk", [&](Deserializer &inner) { chunk.Deserialize(inner); });
+	return make_uniq<DataChunkWrapper>(chunk);
 }
