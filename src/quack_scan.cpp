@@ -17,7 +17,7 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
                                               vector<LogicalType> &return_types, vector<string> &names) {
 	// Set logging to be pretty verbose (everything except message payloads)
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
-		throw BinderException("call_rpc_server URI and query parameters cannot be NULL");
+		throw BinderException("quack_query URI and query parameters cannot be NULL");
 	}
 
 	auto query = input.inputs[1].GetValue<string>();

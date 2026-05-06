@@ -63,7 +63,11 @@ static unique_ptr<Catalog> QuackAttach(optional_ptr<StorageExtensionInfo> storag
 	if (attach_options.options.find("disable_ssl") != attach_options.options.end()) {
 		enable_ssl = !attach_options.options["disable_ssl"].GetValue<bool>();
 	}
-	return make_uniq<QuackCatalog>(db, QuackUri(uri, enable_ssl), context);
+	string token;
+	if (attach_options.options.find("token") != attach_options.options.end()) {
+		token = attach_options.options["token"].GetValue<string>();
+	}
+	return make_uniq<QuackCatalog>(db, QuackUri(uri, enable_ssl), context, token);
 }
 
 static unique_ptr<TransactionManager> QuackCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,

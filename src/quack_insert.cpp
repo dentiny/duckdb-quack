@@ -50,15 +50,12 @@ unique_ptr<GlobalSinkState> QuackInsert::GetGlobalSinkState(ClientContext &conte
 	create_table_info->catalog = quack_schema.GetInfo()->catalog;
 	create_table_info->schema = quack_schema.GetInfo()->schema;
 
-	// TODO
-	// auto catalog_request_message =
-	//     make_uniq<CatalogRequestMessage>(quack_catalog.GetConnectionId(), std::move(create_table_info));
-	// auto catalog_response =
-	//     quack_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
-	// auto entry = make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(
-	//     quack_schema.catalog, quack_schema, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
-	// return make_uniq<QuackInsertGlobalState>(std::move(entry));
-	return nullptr;
+	auto create_request =
+	    make_uniq<PrepareRequestMessage>(quack_catalog.GetConnectionId(), create_table_info->ToString());
+	auto create_response = quack_catalog.GetRawClient().Request<PrepareResponseMessage>(std::move(create_request));
+	auto entry = make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(quack_schema.catalog, quack_schema,
+	                                                                  create_table_info->Cast<CreateTableInfo>());
+	return make_uniq<QuackInsertGlobalState>(std::move(entry));
 }
 
 //===--------------------------------------------------------------------===//

@@ -76,18 +76,21 @@ void QuackTransactionManager::Checkpoint(ClientContext &context, bool force) {
 	throw NotImplementedException("Checkpoint not implemented yet");
 }
 
-QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri_p, ClientContext &context)
+QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri_p, ClientContext &context,
+                           const string &token_p)
     : Catalog(db_p), server_uri(server_uri_p), client(QuackClient::GetClient(context, server_uri)) {
-	string token;
 	auto &secret_manager = SecretManager::Get(context);
 	auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
 	auto match = secret_manager.LookupSecret(transaction, server_uri.Uri(), "quack");
-	if (match.HasMatch()) {
+	string token = token_p;
+	if (token.empty() && match.HasMatch()) {
 		const auto &kv = dynamic_cast<const KeyValueSecret &>(*match.secret_entry->secret);
 		token = kv.TryGetValue("token", true).ToString();
-	} else {
-		// TODO allow token directly?
-		throw InvalidInputException("Could not find token for ATTACH 'quack:...' - Please create a secret first");
+	}
+
+	if (token.empty()) {
+		throw InvalidInputException(
+		    "Could not find token for ATTACH 'quack:...' - Please create a secret first or pass directly");
 	}
 
 	auto connection_response = client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
@@ -194,14 +197,12 @@ TableFunction QuackTableCatalogEntry::GetScanFunction(ClientContext &context, un
 
 optional_ptr<CatalogEntry> QuackCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
 	auto create_schema_info = info.Copy();
+	// TODO this does not make too much sense?
 	create_schema_info->catalog = "memory";
 
-	// TODO
-	// auto catalog_request_message = make_uniq<CatalogRequestMessage>(GetConnectionId(),
-	// std::move(create_schema_info)); auto catalog_response =
-	// GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message)); return
-	// make_uniq_base<CatalogEntry, QuackSchemaCatalogEntry>(
-	//     *this, catalog_response->GetParseInfo()->Cast<CreateSchemaInfo>());
+	auto create_request = make_uniq<PrepareRequestMessage>(GetConnectionId(), create_schema_info->ToString());
+	auto create_respose = GetRawClient().Request<PrepareResponseMessage>(std::move(create_request));
+	return make_uniq_base<CatalogEntry, QuackSchemaCatalogEntry>(*this, create_schema_info->Cast<CreateSchemaInfo>());
 	return nullptr;
 }
 
@@ -267,14 +268,11 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateTable(CatalogTransacti
 	create_table_info->catalog = GetInfo()->catalog;
 	create_table_info->schema = GetInfo()->schema;
 
-	// TODO
-	// auto catalog_request_message =
-	//     make_uniq<CatalogRequestMessage>(quack_catalog.GetConnectionId(), std::move(create_table_info));
-	// auto catalog_response =
-	//     quack_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
-	// return make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(
-	//     catalog, *this, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
-	return nullptr;
+	auto create_message =
+	    make_uniq<PrepareRequestMessage>(quack_catalog.GetConnectionId(), create_table_info->ToString());
+	auto create_response = quack_catalog.GetRawClient().Request<PrepareResponseMessage>(std::move(create_message));
+	return make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(catalog, *this,
+	                                                            create_table_info->Cast<CreateTableInfo>());
 }
 
 optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {
@@ -311,11 +309,9 @@ void QuackSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info_p
 	drop_info->catalog = GetInfo()->catalog;
 	drop_info->schema = GetInfo()->schema;
 
-	// TODO
-	// auto catalog_request_message =
-	//     make_uniq<CatalogRequestMessage>(quack_catalog.GetConnectionId(), std::move(drop_info));
-	//
-	// quack_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
+	auto drop_message = make_uniq<PrepareRequestMessage>(quack_catalog.GetConnectionId(), drop_info->ToString());
+
+	quack_catalog.GetRawClient().Request<PrepareResponseMessage>(std::move(drop_message));
 }
 void QuackSchemaCatalogEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	throw NotImplementedException("Alter not implemented yet, Alter!");
