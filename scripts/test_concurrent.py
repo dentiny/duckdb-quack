@@ -166,7 +166,7 @@ def main():
     print(f"  Total: {total_ops} ops, {total_ops / wall_time:.1f} ops/s, {total_errors} errors")
 
     print("\nTearing down...")
-    server_conn.execute(f"CALL rpc_stop('{address}')")
+    server_conn.execute(f"CALL quack_stop('{address}')")
     server_conn.close()
     if is_unix_socket:
         try:

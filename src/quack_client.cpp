@@ -77,9 +77,6 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(unique_ptr<QuackMessa
 		case MessageType::FETCH_REQUEST:
 			connection_id = request_message->Cast<FetchRequestMessage>().ConnectionId();
 			break;
-		case MessageType::CATALOG_REQUEST:
-			connection_id = request_message->Cast<CatalogRequestMessage>().ConnectionId();
-			break;
 		case MessageType::APPEND_REQUEST:
 			connection_id = request_message->Cast<AppendRequestMessage>().ConnectionId();
 			break;

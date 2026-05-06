@@ -21,15 +21,26 @@ foreach server 'quack:localhost'
 
 
 statement ok con1
-call quack_serve({server});
+call quack_serve({server}, token='asdf');
 
 query II con2
-from quack_query({server}, 'select 42, 43')
+from quack_query({server}, 'select 42, 43', token='asdf')
 ----
 42	43
 
+# we can attach with a straight token
+statement ok con2
+attach {server} as rpc2 (token 'asdf')
+
+statement ok con2
+detach rpc2;
+
+statement ok con2
+create secret (type quack, token 'asdf')
+
 statement ok con2
 attach {server} as rpc
+
 
 query II
 from rpc.fuu;
@@ -129,7 +140,7 @@ detach rpc;
 database not found
 
 statement ok con1
-call rpc_stop({server});
+call quack_stop({server});
 
 statement error con2
 attach {server} as rpc

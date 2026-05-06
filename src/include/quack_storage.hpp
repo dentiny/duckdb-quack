@@ -17,7 +17,7 @@ class QuackStorageExtensionInfo : public StorageExtensionInfo {
 public:
 	static QuackStorageExtensionInfo &GetState(const DatabaseInstance &instance);
 
-	QuackServer &FindOrCreateServer(ClientContext &context, const QuackUri &listen_uri);
+	QuackServer &CreateServer(ClientContext &context, const QuackUri &listen_uri, const string &token);
 	bool StopServer(ClientContext &context, const QuackUri &listen_uri);
 
 	static constexpr const char *STORAGE_EXTENSION_KEY = "quack";

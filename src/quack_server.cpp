@@ -15,7 +15,8 @@
 
 using namespace duckdb;
 
-QuackServer::QuackServer(ClientContext &context_p) : db(context_p.db) {
+QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p)
+    : db(context_p.db), uri(uri_p), token(token_p) {
 }
 
 QuackServer::~QuackServer() {
@@ -100,8 +101,6 @@ static string ExtractConnectionId(QuackMessage &msg) {
 		return msg.Cast<PrepareRequestMessage>().ConnectionId();
 	case MessageType::FETCH_REQUEST:
 		return msg.Cast<FetchRequestMessage>().ConnectionId();
-	case MessageType::CATALOG_REQUEST:
-		return msg.Cast<CatalogRequestMessage>().ConnectionId();
 	case MessageType::APPEND_REQUEST:
 		return msg.Cast<AppendRequestMessage>().ConnectionId();
 	default:
@@ -156,9 +155,9 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(QuackMessage &received_messa
 	return response;
 }
 
-static vector<unique_ptr<DataChunk>> CreateBatch(Allocator &allocator, unique_ptr<QueryResult> &query_result,
-                                                 idx_t max_chunks) {
-	vector<unique_ptr<DataChunk>> results;
+static vector<unique_ptr<DataChunkWrapper>> CreateBatch(Allocator &allocator, unique_ptr<QueryResult> &query_result,
+                                                        idx_t max_chunks) {
+	vector<unique_ptr<DataChunkWrapper>> results;
 
 	while (results.size() < max_chunks) {
 		auto result_chunk = query_result->Fetch();
@@ -172,7 +171,7 @@ static vector<unique_ptr<DataChunk>> CreateBatch(Allocator &allocator, unique_pt
 			query_result.reset();
 			break;
 		}
-		results.push_back(std::move(result_chunk));
+		results.push_back(make_uniq<DataChunkWrapper>(*result_chunk));
 	}
 	return results;
 }
@@ -183,8 +182,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
 		string session_id = GenerateSessionId();
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authentication_function")),
-		        Value(session_id), Value(connection_request_message.AuthString()))) {
+		        *db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(*db, "quack_authentication_function")),
+		        Value(session_id), Value(connection_request_message.AuthString()), Value(Token()))) {
 			return make_uniq<ErrorMessage>("Authentication failed");
 		}
 		return make_uniq<ConnectionResponseMessage>(CreateNewConnection(session_id));
@@ -205,10 +204,6 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 
 		std::unique_lock<std::mutex> lock(connection->lock);
 		connection->duckdb_query_result.reset();
-
-		if (!prepare_request_message.ImmediatelyExecute()) {
-			return make_uniq<ErrorMessage>("EEEK");
-		}
 
 		{
 			auto query_result = connection->duckdb_connection->SendQuery(prepare_request_message.Query());
@@ -276,64 +271,25 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 		return make_uniq<FetchResponseMessage>(std::move(results), optional_idx(assigned_batch_index));
 	}
 
-	case MessageType::CATALOG_REQUEST: {
-		auto &catalog_request_message = received_message.Cast<CatalogRequestMessage>();
-		optional_ptr<QuackConnection> connection = GetConnection(catalog_request_message.ConnectionId());
-		if (!connection) {
-			return make_uniq<ErrorMessage>("Invalid connection id");
-		}
-		std::unique_lock<std::mutex> lock(connection->lock);
-		auto &context = *connection->duckdb_connection->context;
-
-		// FIXME handle other types!
-		auto parse_info = catalog_request_message.GetParseInfo();
-
-		switch (parse_info->info_type) {
-		case ParseInfoType::CREATE_INFO: {
-			auto &create_info = parse_info->Cast<CreateInfo>();
-			auto &catalog = Catalog::GetCatalog(context, create_info.catalog);
-			switch (create_info.type) {
-			case CatalogType::TABLE_ENTRY: {
-				unique_ptr<CreateTableInfo> create_table_info(
-				    reinterpret_cast<CreateTableInfo *>(parse_info.release()));
-				auto &meta_transaction = MetaTransaction::Get(context);
-				meta_transaction.ModifyDatabase(catalog.GetAttached(), DatabaseModificationType::CREATE_CATALOG_ENTRY);
-				auto create_result = catalog.CreateTable(context, std::move(create_table_info));
-				return make_uniq<CatalogResponseMessage>(create_result->GetInfo());
-			}
-			case CatalogType::SCHEMA_ENTRY: {
-				auto &meta_transaction = MetaTransaction::Get(context);
-				meta_transaction.ModifyDatabase(catalog.GetAttached(), DatabaseModificationType::CREATE_CATALOG_ENTRY);
-				auto create_result = catalog.CreateSchema(context, parse_info->Cast<CreateSchemaInfo>());
-				return make_uniq<CatalogResponseMessage>(create_result->GetInfo());
-			}
-			default:
-				return make_uniq<ErrorMessage>(
-				    StringUtil::Format("Unimplemented catalog type %s", CatalogTypeToString(create_info.type)));
-			}
-		}
-		case ParseInfoType::DROP_INFO: {
-			auto &drop_info = parse_info->Cast<DropInfo>();
-			auto &catalog = Catalog::GetCatalog(context, drop_info.catalog);
-			switch (drop_info.type) {
-			case CatalogType::TABLE_ENTRY: {
-				auto &meta_transaction = MetaTransaction::Get(context);
-				meta_transaction.ModifyDatabase(catalog.GetAttached(), DatabaseModificationType::DROP_CATALOG_ENTRY);
-				catalog.DropEntry(context, drop_info);
-				return make_uniq<CatalogResponseMessage>(drop_info.Copy()); // The copy is not used but oh well
-			}
-			default:
-				return make_uniq<ErrorMessage>(
-				    StringUtil::Format("Unimplemented catalog type %s", CatalogTypeToString(drop_info.type)));
-			}
-		}
-		default:
-			return make_uniq<ErrorMessage>("Unimplemented parse info type");
-		}
-	}
 	case MessageType::APPEND_REQUEST: {
 		auto &append_request_message = received_message.Cast<AppendRequestMessage>();
 		optional_ptr<QuackConnection> connection = GetConnection(append_request_message.ConnectionId());
+		if (!connection) {
+			return make_uniq<ErrorMessage>("Invalid connection id");
+		}
+
+		// we never execute this query, but throw it at the authorization function so it can check if this user gets to
+		// insert into this table
+		auto dummy_insert_query = "INSERT INTO " + append_request_message.SchemaName() + "." +
+		                          append_request_message.TableName() + " VALUES (NULL)";
+
+		// TODO do not do this if there is no fun set
+		if (!EvaluateAuthQuery(
+		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authorization_function")),
+		        Value(append_request_message.ConnectionId()), Value(dummy_insert_query))) {
+			return make_uniq<ErrorMessage>("Authorization failed");
+		}
+
 		std::unique_lock<std::mutex> lock(connection->lock);
 		auto &context = *connection->duckdb_connection->context;
 		auto table_info = context.TableInfo(append_request_message.SchemaName(), append_request_message.TableName());

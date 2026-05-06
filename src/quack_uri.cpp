@@ -6,8 +6,7 @@ QuackUri::QuackUri(string uri_p, bool ssl_p) : ssl(ssl_p), uri(uri_p) {
 	// we should really instantiate a parser here instead, but alas
 	// whitespace be gone
 	ipv6 = false;
-	port = 1294;
-
+	port = 9494;
 	StringUtil::Trim(uri);
 	// first off, lets be tolerant and accept this variant, too
 	if (StringUtil::StartsWith(uri, "quack://")) {

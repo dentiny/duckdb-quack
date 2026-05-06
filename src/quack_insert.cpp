@@ -50,12 +50,11 @@ unique_ptr<GlobalSinkState> QuackInsert::GetGlobalSinkState(ClientContext &conte
 	create_table_info->catalog = quack_schema.GetInfo()->catalog;
 	create_table_info->schema = quack_schema.GetInfo()->schema;
 
-	auto catalog_request_message =
-	    make_uniq<CatalogRequestMessage>(quack_catalog.GetConnectionId(), std::move(create_table_info));
-	auto catalog_response =
-	    quack_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
-	auto entry = make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(
-	    quack_schema.catalog, quack_schema, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
+	auto create_request =
+	    make_uniq<PrepareRequestMessage>(quack_catalog.GetConnectionId(), create_table_info->ToString());
+	auto create_response = quack_catalog.GetRawClient().Request<PrepareResponseMessage>(std::move(create_request));
+	auto entry = make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(quack_schema.catalog, quack_schema,
+	                                                                  create_table_info->Cast<CreateTableInfo>());
 	return make_uniq<QuackInsertGlobalState>(std::move(entry));
 }
 
@@ -69,8 +68,9 @@ SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 	auto append_chunk = make_uniq<DataChunk>();
 	append_chunk->Initialize(context.client, chunk.GetTypes());
 	append_chunk->Reference(chunk);
+	auto chunk_wrapper = make_uniq<DataChunkWrapper>(*append_chunk);
 	auto append_message = make_uniq<AppendRequestMessage>(quack_catalog.GetConnectionId(), tbl.schema.name, tbl.name,
-	                                                      std::move(append_chunk));
+	                                                      std::move(chunk_wrapper));
 	quack_catalog.GetRawClient().Request<AppendResponseMessage>(std::move(append_message));
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;

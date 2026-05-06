@@ -17,15 +17,15 @@ QuackStorageExtensionInfo &QuackStorageExtensionInfo::GetState(const DatabaseIns
 	return *static_cast<QuackStorageExtensionInfo *>(ext->storage_info.get());
 }
 
-QuackServer &QuackStorageExtensionInfo::FindOrCreateServer(ClientContext &context, const QuackUri &listen_uri) {
+QuackServer &QuackStorageExtensionInfo::CreateServer(ClientContext &context, const QuackUri &listen_uri,
+                                                     const string &token) {
 	std::lock_guard<std::mutex> lock(servers_mutex);
 	auto it = servers.find(listen_uri.Uri());
 	if (it != servers.end()) {
-		return *it->second;
+		throw InvalidInputException("Server already exists for %s", listen_uri.Uri());
 	}
 	unique_ptr<QuackServer> server;
-	server = make_uniq<HttpQuackServer>(context);
-	server->Listen(listen_uri);
+	server = make_uniq<HttpQuackServer>(context, listen_uri, token);
 	servers.emplace(listen_uri.Uri(), std::move(server));
 	return *servers[listen_uri.Uri()];
 }
@@ -42,7 +42,7 @@ bool QuackStorageExtensionInfo::StopServer(ClientContext &context, const QuackUr
 		servers.erase(it);
 	}
 	// Synchronously free the listening port so that clients racing a subsequent
-	// connect() after rpc_stop observe a real refusal rather than a stale socket.
+	// connect() after quack_stop observe a real refusal rather than a stale socket.
 	to_destroy->Close();
 	// Full destruction (httplib worker-pool join) runs off-thread so that when
 	// quack_stop is invoked from inside one of the server's own worker threads
@@ -62,7 +62,11 @@ static unique_ptr<Catalog> QuackAttach(optional_ptr<StorageExtensionInfo> storag
 	if (attach_options.options.find("disable_ssl") != attach_options.options.end()) {
 		enable_ssl = !attach_options.options["disable_ssl"].GetValue<bool>();
 	}
-	return make_uniq<QuackCatalog>(db, QuackUri(uri, enable_ssl), context);
+	string token;
+	if (attach_options.options.find("token") != attach_options.options.end()) {
+		token = attach_options.options["token"].GetValue<string>();
+	}
+	return make_uniq<QuackCatalog>(db, QuackUri(uri, enable_ssl), context, token);
 }
 
 static unique_ptr<TransactionManager> QuackCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,

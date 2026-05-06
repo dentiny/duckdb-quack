@@ -8,7 +8,48 @@
 using namespace duckdb;
 
 string duckdb::MessageTypeToString(MessageType type) {
-	switch (type) {
+	return EnumUtil::ToString(type);
+}
+
+template <>
+MessageType EnumUtil::FromString<MessageType>(const char *value) {
+	if (StringUtil::Equals(value, "INVALID")) {
+		return MessageType::INVALID;
+	}
+	if (StringUtil::Equals(value, "CONNECTION_REQUEST")) {
+		return MessageType::CONNECTION_REQUEST;
+	}
+	if (StringUtil::Equals(value, "CONNECTION_RESPONSE")) {
+		return MessageType::CONNECTION_RESPONSE;
+	}
+	if (StringUtil::Equals(value, "PREPARE_REQUEST")) {
+		return MessageType::PREPARE_REQUEST;
+	}
+	if (StringUtil::Equals(value, "PREPARE_RESPONSE")) {
+		return MessageType::PREPARE_RESPONSE;
+	}
+	if (StringUtil::Equals(value, "FETCH_REQUEST")) {
+		return MessageType::FETCH_REQUEST;
+	}
+	if (StringUtil::Equals(value, "FETCH_RESPONSE")) {
+		return MessageType::FETCH_RESPONSE;
+	}
+	if (StringUtil::Equals(value, "APPEND_REQUEST")) {
+		return MessageType::APPEND_REQUEST;
+	}
+	if (StringUtil::Equals(value, "APPEND_RESPONSE")) {
+		return MessageType::APPEND_RESPONSE;
+	}
+	if (StringUtil::Equals(value, "ERROR_RESPONSE")) {
+		return MessageType::ERROR_RESPONSE;
+	}
+
+	throw NotImplementedException(StringUtil::Format("Enum value of type MessageType: '%s' not implemented", value));
+}
+
+template <>
+const char *EnumUtil::ToChars<MessageType>(MessageType value) {
+	switch (value) {
 	case MessageType::CONNECTION_REQUEST:
 		return "CONNECTION_REQUEST";
 	case MessageType::CONNECTION_RESPONSE:
@@ -21,20 +62,17 @@ string duckdb::MessageTypeToString(MessageType type) {
 		return "FETCH_REQUEST";
 	case MessageType::FETCH_RESPONSE:
 		return "FETCH_RESPONSE";
-	case MessageType::CATALOG_REQUEST:
-		return "CATALOG_REQUEST";
-	case MessageType::CATALOG_RESPONSE:
-		return "CATALOG_RESPONSE";
 	case MessageType::APPEND_REQUEST:
 		return "APPEND_REQUEST";
 	case MessageType::APPEND_RESPONSE:
 		return "APPEND_RESPONSE";
 	case MessageType::ERROR_RESPONSE:
 		return "ERROR_RESPONSE";
-	case MessageType::INVALID:
-		break;
+
+	default:
+		throw NotImplementedException(
+		    StringUtil::Format("Enum value of type MessageType: '%d' not implemented", value));
 	}
-	return "INVALID";
 }
 
 void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
@@ -54,232 +92,12 @@ unique_ptr<QuackMessage> QuackMessage::FromMemoryStream(MemoryStream &read_strea
 	return Deserialize(deserializer);
 }
 
-void QuackMessage::Serialize(Serializer &serializer) const {
-	serializer.WriteProperty<uint8_t>(10, "message_type", static_cast<uint8_t>(message_type));
+void DataChunkWrapper::Serialize(Serializer &serializer) const {
+	serializer.WriteObject(300, "chunk", [&](Serializer &inner) { chunk.Serialize(inner); });
 }
 
-unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer) {
-	auto message_type = static_cast<MessageType>(deserializer.ReadProperty<uint8_t>(10, "message_type"));
-	switch (message_type) {
-	case MessageType::CONNECTION_REQUEST:
-		return ConnectionRequestMessage::Deserialize(deserializer);
-	case MessageType::CONNECTION_RESPONSE:
-		return ConnectionResponseMessage::Deserialize(deserializer);
-	case MessageType::PREPARE_REQUEST:
-		return PrepareRequestMessage::Deserialize(deserializer);
-	case MessageType::PREPARE_RESPONSE:
-		return PrepareResponseMessage::Deserialize(deserializer);
-	case MessageType::FETCH_REQUEST:
-		return FetchRequestMessage::Deserialize(deserializer);
-	case MessageType::FETCH_RESPONSE:
-		return FetchResponseMessage::Deserialize(deserializer);
-	case MessageType::CATALOG_REQUEST:
-		return CatalogRequestMessage::Deserialize(deserializer);
-	case MessageType::CATALOG_RESPONSE:
-		return CatalogResponseMessage::Deserialize(deserializer);
-	case MessageType::APPEND_REQUEST:
-		return AppendRequestMessage::Deserialize(deserializer);
-	case MessageType::APPEND_RESPONSE:
-		return AppendResponseMessage::Deserialize(deserializer);
-	case MessageType::ERROR_RESPONSE:
-		return ErrorMessage::Deserialize(deserializer);
-	default:
-		throw SerializationException("Unsupported type for deserialization of Message!");
-	}
-}
-
-void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(80, "auth_string", auth_string);
-}
-
-unique_ptr<QuackMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto auth_string = deserializer.ReadProperty<string>(80, "auth_string");
-	return make_uniq<ConnectionRequestMessage>(auth_string);
-}
-
-void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(98, "connection_id", connection_id);
-}
-
-unique_ptr<QuackMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
-	return make_uniq<ConnectionResponseMessage>(connection_id);
-}
-
-void PrepareRequestMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(98, "connection_id", connection_id);
-	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
-	serializer.WriteProperty<string>(200, "sql_query", sql_query);
-	serializer.WriteProperty<bool>(201, "immediately_execute", immediately_execute);
-}
-
-unique_ptr<QuackMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
-	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
-	auto sql_query = deserializer.ReadProperty<string>(200, "sql_query");
-	auto immediately_execute = deserializer.ReadProperty<bool>(201, "immediately_execute");
-	auto msg = make_uniq<PrepareRequestMessage>(connection_id, sql_query, immediately_execute);
-	msg->SetClientQueryId(cqid);
-	return msg;
-}
-
-void PrepareResponseMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<vector<LogicalType>>(210, "result_types", result_types);
-	serializer.WriteProperty<vector<string>>(211, "result_names", result_names);
-	serializer.WriteProperty<bool>(215, "needs_more_fetch", needs_more_fetch);
-
-	serializer.WriteList(216, "results", results.size(), [&](Serializer::List &list, idx_t i) {
-		list.WriteObject([&](Serializer &inner) { results[i]->Serialize(inner); });
-	});
-}
-
-unique_ptr<QuackMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto result_types = deserializer.ReadProperty<vector<LogicalType>>(210, "result_types");
-	auto result_names = deserializer.ReadProperty<vector<string>>(211, "result_names");
-	auto needs_more_fetch = deserializer.ReadProperty<bool>(215, "needs_more_fetch");
-	unique_ptr<ColumnDataCollection> results_p;
-
-	vector<unique_ptr<DataChunk>> results;
-	deserializer.ReadList(216, "results", [&](Deserializer::List &list, idx_t i) {
-		auto chunk = make_uniq<DataChunk>();
-		list.ReadObject([&](Deserializer &inner) { chunk->Deserialize(inner); });
-		results.push_back(std::move(chunk));
-	});
-	return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names), std::move(results),
-	                                         needs_more_fetch);
-}
-
-void FetchRequestMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(98, "connection_id", connection_id);
-	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
-}
-
-unique_ptr<QuackMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
-	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
-
-	auto msg = make_uniq<FetchRequestMessage>(connection_id);
-	msg->SetClientQueryId(cqid);
-	return msg;
-}
-
-void FetchResponseMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<optional_idx>(253, "batch_index", batch_index);
-	serializer.WriteList(254, "results", results.size(), [&](Serializer::List &list, idx_t i) {
-		list.WriteObject([&](Serializer &inner) { results[i]->Serialize(inner); });
-	});
-}
-
-unique_ptr<QuackMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto batch_index = deserializer.ReadProperty<optional_idx>(253, "batch_index");
-	vector<unique_ptr<DataChunk>> results;
-
-	deserializer.ReadList(254, "results", [&](Deserializer::List &list, idx_t i) {
-		auto chunk = make_uniq<DataChunk>();
-		list.ReadObject([&](Deserializer &inner) { chunk->Deserialize(inner); });
-		results.push_back(std::move(chunk));
-	});
-
-	return make_uniq<FetchResponseMessage>(std::move(results), batch_index);
-}
-
-void ErrorMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(260, "error_message", error_message);
-}
-
-unique_ptr<QuackMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
-	auto error_message = deserializer.ReadProperty<string>(260, "error_message");
-	return make_uniq<ErrorMessage>(error_message);
-}
-
-void CatalogRequestMessage::Serialize(Serializer &serializer) const {
-	D_ASSERT(parse_info);
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(98, "connection_id", connection_id);
-	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
-	// FIXME this is only required because serialization of parse info is borked
-	serializer.WriteProperty<ParseInfoType>(97, "info_type", parse_info->info_type);
-	parse_info->Serialize(serializer);
-}
-
-unique_ptr<QuackMessage> CatalogRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
-	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
-	auto info_type = deserializer.ReadProperty<ParseInfoType>(97, "info_type");
-	unique_ptr<ParseInfo> parse_info;
-	switch (info_type) {
-	case ParseInfoType::CREATE_INFO:
-		parse_info = CreateInfo::Deserialize(deserializer);
-		break;
-	default:
-		parse_info = ParseInfo::Deserialize(deserializer);
-		break;
-	}
-	auto msg = make_uniq<CatalogRequestMessage>(connection_id, std::move(parse_info));
-	msg->SetClientQueryId(cqid);
-	return msg;
-}
-
-void CatalogResponseMessage::Serialize(Serializer &serializer) const {
-	D_ASSERT(parse_info);
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<ParseInfoType>(97, "info_type", parse_info->info_type);
-	parse_info->Serialize(serializer);
-}
-
-// TODO this is duplicated
-unique_ptr<QuackMessage> CatalogResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto info_type = deserializer.ReadProperty<ParseInfoType>(97, "info_type");
-	unique_ptr<ParseInfo> parse_info;
-	switch (info_type) {
-	case ParseInfoType::CREATE_INFO:
-		parse_info = CreateInfo::Deserialize(deserializer);
-		break;
-	default:
-		parse_info = ParseInfo::Deserialize(deserializer);
-		break;
-	}
-	return make_uniq<CatalogResponseMessage>(std::move(parse_info));
-}
-
-void AppendRequestMessage::Serialize(Serializer &serializer) const {
-	D_ASSERT(append_chunk);
-	QuackMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(98, "connection_id", connection_id);
-	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
-	serializer.WriteProperty<string>(270, "schema_name", schema_name);
-	serializer.WriteProperty<string>(271, "table_name", table_name);
-
-	serializer.WriteObject(272, "append_chunk",
-	                       [&](Serializer &inner_serializer) { append_chunk->Serialize(inner_serializer); });
-}
-
-unique_ptr<QuackMessage> AppendRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id_p = deserializer.ReadProperty<string>(98, "connection_id");
-	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
-	auto schema_name_p = deserializer.ReadProperty<string>(270, "schema_name");
-	auto table_name_p = deserializer.ReadProperty<string>(271, "table_name");
-
-	auto append_chunk_p = make_uniq<DataChunk>();
-	deserializer.ReadObject(272, "append_chunk",
-	                        [&](Deserializer &inner_deserializer) { append_chunk_p->Deserialize(inner_deserializer); });
-
-	auto msg = make_uniq<AppendRequestMessage>(connection_id_p, schema_name_p, table_name_p, std::move(append_chunk_p));
-	msg->SetClientQueryId(cqid);
-	return msg;
-}
-
-void AppendResponseMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-}
-
-unique_ptr<QuackMessage> AppendResponseMessage::Deserialize(Deserializer &deserializer) {
-	return make_uniq<AppendResponseMessage>();
+unique_ptr<DataChunkWrapper> DataChunkWrapper::Deserialize(Deserializer &deserializer) {
+	DataChunk chunk;
+	deserializer.ReadObject(300, "chunk", [&](Deserializer &inner) { chunk.Deserialize(inner); });
+	return make_uniq<DataChunkWrapper>(chunk);
 }

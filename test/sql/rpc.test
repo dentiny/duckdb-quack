@@ -11,11 +11,28 @@ set ignore_error_messages __none__
 foreach server 'quack:localhost'
 
 
-statement ok con1
-call quack_serve({server});
+query III con1
+call quack_serve({server}, token='asdf');
+----
+quack:localhost	http://localhost:9494	asdf
 
 sleep 100 millisecond
 
+# we can use the direct token param
+query I con2
+from quack_query({server}, 'select 42', token='asdf')
+----
+42
+
+# we fail with the wrong token
+statement error con2
+from quack_query({server}, 'select 42', token='fdsa')
+----
+Authentication failed
+
+# or a secret
+statement ok con2
+create secret (type quack, token 'asdf')
 
 query I con2
 from quack_query({server}, 'select 42')
@@ -114,10 +131,10 @@ statement ok con2
 from quack_query({server}, 'select 42')
 
 statement ok con 1
-call rpc_stop({server})
+call quack_stop({server})
 
 statement ok con 1
-call rpc_stop({server})
+call quack_stop({server})
 
 statement error con2
 from quack_query({server}, 'select 42')

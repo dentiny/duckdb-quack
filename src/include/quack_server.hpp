@@ -31,9 +31,7 @@ struct QuackConnection {
 
 class QuackServer {
 public:
-	explicit QuackServer(ClientContext &context_p);
-	// TODO should listen be part of the constructor?
-	virtual void Listen(const QuackUri &uri) {};
+	explicit QuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p);
 
 	//! Synchronously stop accepting connections and join the listener threads.
 	virtual void Close() {};
@@ -43,6 +41,10 @@ public:
 	// TODO need something to destroy connections
 
 	string GenerateSessionId();
+
+	const string &Token() {
+		return token;
+	}
 
 	virtual ~QuackServer();
 
@@ -59,13 +61,16 @@ protected:
 
 	mutex session_id_rng_mutex;
 	shared_ptr<EncryptionState> session_id_rng;
+
+private:
+	QuackUri uri;
+	string token;
 };
 
 class HttpQuackServer : public QuackServer {
 public:
-	HttpQuackServer(ClientContext &context_p) : QuackServer(context_p) {
-	}
-	void Listen(const QuackUri &uri) override;
+	HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p);
+
 	void Close() override;
 
 	~HttpQuackServer() override;
