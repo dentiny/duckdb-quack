@@ -17,7 +17,7 @@ enum class MessageType : uint8_t {
 	CATALOG_RESPONSE = 10,
 	APPEND_REQUEST = 11,
 	APPEND_RESPONSE = 12,
-	ERROR = 100
+	ERROR_RESPONSE = 100
 };
 
 string MessageTypeToString(MessageType type);
@@ -304,7 +304,7 @@ public:
 
 class ErrorMessage : public QuackMessage {
 public:
-	static constexpr MessageType TYPE = MessageType::ERROR;
+	static constexpr MessageType TYPE = MessageType::ERROR_RESPONSE;
 	explicit ErrorMessage(const string &error_message_p) : QuackMessage(TYPE), error_message(error_message_p) {
 	}
 	const std::string &Error() const {

@@ -145,7 +145,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(QuackMessage &received_messa
 		                       .time_since_epoch()
 		                       .count();
 		string error;
-		if (response->Type() == MessageType::ERROR) {
+		if (response->Type() == MessageType::ERROR_RESPONSE) {
 			error = response->Cast<ErrorMessage>().Error();
 		}
 		auto msg = QuackLogType::ConstructLogMessage(received_message.Type(), connection_id, client_query_id, query, "",

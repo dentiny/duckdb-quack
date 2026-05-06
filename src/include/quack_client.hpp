@@ -18,7 +18,7 @@ public:
 	unique_ptr<TARGET> Request(unique_ptr<QuackMessage> request_message) {
 		auto response_message = RequestInternal(std::move(request_message)).release();
 		if (response_message->Type() != TARGET::TYPE) {
-			if (response_message->Type() == MessageType::ERROR) {
+			if (response_message->Type() == MessageType::ERROR_RESPONSE) {
 				throw IOException("Expected %s message, got error message instead: %s",
 				                  MessageTypeToString(TARGET::TYPE),
 				                  response_message->Cast<ErrorMessage>().Error().c_str());

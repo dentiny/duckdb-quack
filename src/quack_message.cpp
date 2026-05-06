@@ -29,8 +29,8 @@ string duckdb::MessageTypeToString(MessageType type) {
 		return "APPEND_REQUEST";
 	case MessageType::APPEND_RESPONSE:
 		return "APPEND_RESPONSE";
-	case MessageType::ERROR:
-		return "ERROR";
+	case MessageType::ERROR_RESPONSE:
+		return "ERROR_RESPONSE";
 	case MessageType::INVALID:
 		break;
 	}
@@ -81,7 +81,7 @@ unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer) {
 		return AppendRequestMessage::Deserialize(deserializer);
 	case MessageType::APPEND_RESPONSE:
 		return AppendResponseMessage::Deserialize(deserializer);
-	case MessageType::ERROR:
+	case MessageType::ERROR_RESPONSE:
 		return ErrorMessage::Deserialize(deserializer);
 	default:
 		throw SerializationException("Unsupported type for deserialization of Message!");
