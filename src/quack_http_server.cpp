@@ -8,9 +8,17 @@
 
 namespace duckdb {
 
+void HttpQuackServer::StopAccepting() {
+	// Closes the listening socket only. Idempotent. Safe to call from a
+	// request-handler thread.
+	server->stop();
+}
+
 void HttpQuackServer::Close() {
-	// Stops accepting new connections and joins the listener threads (NOT the
-	// httplib worker pool)
+	// Stops accepting new connections AND joins the listener threads (NOT the
+	// httplib worker pool). Must not be called from a worker thread — the
+	// listener's exit path inside httplib joins all workers, so a worker
+	// joining the listener would deadlock through that chain.
 	server->stop();
 	try {
 		for (auto &thread : listen_threads) {
@@ -29,7 +37,8 @@ HttpQuackServer::~HttpQuackServer() {
 void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port) {
 	D_ASSERT(server->server);
 	D_ASSERT(listen_port > 1 && listen_port < 65535);
-	server->server->listen(listen_host, listen_port);
+	// Socket is already bound (synchronously, in the constructor)
+	server->server->listen_after_bind();
 }
 
 HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p)
@@ -76,6 +85,14 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 
 	if (!server->is_valid()) {
 		throw IOException("Failed to instantiate DuckDB server at %s / %s", uri_p.Uri(), uri_p.Http());
+	}
+
+	// Bind synchronously here so that bind() failures (e.g. EADDRINUSE)
+	// propagate to the caller of quack_serve()
+	if (!server->bind_to_port(uri_p.Host(), uri_p.Port())) {
+		throw IOException("Failed to bind DuckDB Quack RPC server to %s (address in use, permission denied, "
+		                  "or invalid host/port)",
+		                  uri_p.Http());
 	}
 
 	listen_threads.push_back(std::thread(ListenThread, this, uri_p.Host(), uri_p.Port()));
