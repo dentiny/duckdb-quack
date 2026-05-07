@@ -20,22 +20,23 @@ QuackStorageExtensionInfo &QuackStorageExtensionInfo::GetState(const DatabaseIns
 
 QuackServer &QuackStorageExtensionInfo::CreateServer(ClientContext &context, const QuackUri &listen_uri,
                                                      const string &token) {
+	auto key = listen_uri.CanonicalUri();
 	std::lock_guard<std::mutex> lock(servers_mutex);
-	auto it = servers.find(listen_uri.Uri());
+	auto it = servers.find(key);
 	if (it != servers.end()) {
-		throw InvalidInputException("Server already exists for %s", listen_uri.Uri());
+		throw InvalidInputException("Server already exists for %s", key);
 	}
 	unique_ptr<QuackServer> server;
 	server = make_uniq<HttpQuackServer>(context, listen_uri, token);
-	servers.emplace(listen_uri.Uri(), std::move(server));
-	return *servers[listen_uri.Uri()];
+	servers.emplace(key, std::move(server));
+	return *servers[key];
 }
 
 bool QuackStorageExtensionInfo::StopServer(ClientContext &context, const QuackUri &listen_uri) {
 	unique_ptr<QuackServer> to_destroy;
 	{
 		std::lock_guard<std::mutex> lock(servers_mutex);
-		const auto it = servers.find(listen_uri.Uri());
+		const auto it = servers.find(listen_uri.CanonicalUri());
 		if (it == servers.end()) {
 			return false;
 		}
@@ -44,7 +45,13 @@ bool QuackStorageExtensionInfo::StopServer(ClientContext &context, const QuackUr
 	}
 	// Synchronously free the listening port so that clients racing a subsequent
 	// connect() after quack_stop observe a real refusal rather than a stale socket.
-	to_destroy->Close();
+	// Synchronously close the listening socket so the port is free immediately
+	// (callers racing a subsequent connect() see a real refusal, not a stale
+	// listener). The full teardown (joining listener thread + httplib worker
+	// pool) happens off-thread below — that join cannot run on the worker
+	// that's currently executing this very stop request, because the listener's
+	// exit path joins all workers and would deadlock.
+	to_destroy->StopAccepting();
 	// Full destruction (httplib worker-pool join) runs off-thread so that when
 	// quack_stop is invoked from inside one of the server's own worker threads
 	std::thread([srv = std::move(to_destroy)]() mutable { srv.reset(); }).detach();
