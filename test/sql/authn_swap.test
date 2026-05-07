@@ -1,5 +1,5 @@
 # name: test/sql/authn_swap.test
-# description: swap quack_authentication_function at runtime
+# description: swap quack_authentication_function and quack_authorization_function at runtime
 # group: [quack]
 
 require quack
@@ -98,6 +98,101 @@ statement error con2
 FROM quack_query('quack:localhost', 'select 42', token='fdsa');
 ----
 Authentication failed
+
+# Phase 6: non-trivial authn — accept iff the client-supplied token equals
+# 'duck', ignoring sid and the server-configured token.
+# Macro arg order: (sid, client_token, server_token) — arg[1] is the value the
+# client passed as token=..., arg[2] is the server-configured token.
+statement ok con1
+CREATE MACRO authn_duck(sid, client_token, server_token) AS client_token = 'duck';
+
+statement ok con1
+SET quack_authentication_function = 'authn_duck';
+
+query I con2
+FROM quack_query('quack:localhost', 'select 42', token='duck');
+----
+42
+
+# the server-configured token ('asdf') is no longer special — only 'duck' passes
+statement error con2
+FROM quack_query('quack:localhost', 'select 42', token='asdf');
+----
+Authentication failed
+
+statement error con2
+FROM quack_query('quack:localhost', 'select 42', token='quack');
+----
+Authentication failed
+
+statement ok con1
+RESET GLOBAL quack_authentication_function;
+
+####################
+# quack_authorization_function — authn stays at default (quack_check_token)
+####################
+
+statement ok con1
+CREATE MACRO authz_no(sid, query)  AS false;
+
+statement ok con1
+CREATE MACRO authz_yes(sid, query) AS true;
+
+# Phase A: deny-all — even an authenticated request is rejected
+statement ok con1
+SET quack_authorization_function = 'authz_no';
+
+statement error con2
+FROM quack_query('quack:localhost', 'select 42', token='asdf');
+----
+Authorization failed
+
+# Phase B: allow-all (default-equivalent)
+statement ok con1
+SET quack_authorization_function = 'quack_nop_authorization';
+
+query I con2
+FROM quack_query('quack:localhost', 'select 42', token='asdf');
+----
+42
+
+# Phase C: explicit authz_yes
+statement ok con1
+SET quack_authorization_function = 'authz_yes';
+
+query I con2
+FROM quack_query('quack:localhost', 'select 42', token='asdf');
+----
+42
+
+# Authn still gates: wrong token fails before authz runs
+statement error con2
+FROM quack_query('quack:localhost', 'select 42', token='fdsa');
+----
+Authentication failed
+
+# Phase D: non-existent function — authz path fails closed
+statement ok con1
+SET quack_authorization_function = 'authz_does_not_exist';
+
+statement error con2
+FROM quack_query('quack:localhost', 'select 42', token='asdf');
+----
+Authorization failed
+
+# Phase E: RESET GLOBAL restores the default (quack_nop_authorization)
+statement ok con1
+RESET GLOBAL quack_authorization_function;
+
+query I con1
+SELECT current_setting('quack_authorization_function');
+----
+quack_nop_authorization
+
+query I con2
+FROM quack_query('quack:localhost', 'select 42', token='asdf');
+----
+42
 
 statement ok con1
 CALL quack_stop('quack:localhost');
