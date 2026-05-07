@@ -10,10 +10,6 @@ namespace duckdb {
 QuackMessage::QuackMessage(MessageType type) : header(type, string()) {
 }
 QuackMessage::QuackMessage(MessageType type, string connection_id_p) : header(type, std::move(connection_id_p)) {
-	// if (connection_id_p.empty()) {
-	// 	throw InvalidInputException("Received message of type \"%s\" with an empty connection id - but this message type
-	// requires a connection id", EnumUtil::ToString(type));
-	// }
 }
 
 string MessageTypeToString(MessageType type) {
@@ -89,9 +85,6 @@ void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	SerializationOptions options;
 	options.serialization_compatibility = SerializationCompatibility::FromIndex(10);
 	BinarySerializer serializer(write_stream, options);
-
-	// serializer.Begin();
-	// serializer.End();
 
 	serializer.Begin();
 	// write the header
