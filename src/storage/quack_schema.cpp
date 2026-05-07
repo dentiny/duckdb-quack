@@ -31,6 +31,10 @@ ORDER BY ALL
 	)";
 }
 
+QuackSchemaCatalogEntry::QuackSchemaCatalogEntry(Catalog &catalog_p, CreateSchemaInfo &info_p)
+    : SchemaCatalogEntry(catalog_p, info_p) {
+}
+
 QuackSchemaCatalogEntry::QuackSchemaCatalogEntry(ClientContext &context, Catalog &catalog_p, CreateSchemaInfo &info_p,
                                                  const QuackLoadCatalogData &load_data)
     : SchemaCatalogEntry(catalog_p, info_p) {
