@@ -1,22 +1,23 @@
 #pragma once
 
-#include "client.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
-#include "duckdb/transaction/meta_transaction.hpp"
 #include "duckdb/transaction/transaction.hpp"
 #include "duckdb/transaction/transaction_manager.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
 
+#include "quack_uri.hpp"
+
 namespace duckdb {
 
-class RpcCatalog;
+class QuackCatalog;
+class QuackClient;
 
-class RpcTransaction : public Transaction {
+class QuackTransaction : public Transaction {
 public:
-	RpcTransaction(RpcCatalog &rpc_catalog_p, TransactionManager &manager_p, ClientContext &context_p);
-	~RpcTransaction() override;
+	QuackTransaction(QuackCatalog &quack_catalog_p, TransactionManager &manager_p, ClientContext &context_p);
+	~QuackTransaction() override;
 	// TODO
 	void Start();
 	void Commit();
@@ -26,16 +27,16 @@ public:
 	// void DropEntry(CatalogType type, const string &table_name, bool cascade);
 	// void ClearTableEntry(const string &table_name);
 	//
-	static RpcTransaction &Get(ClientContext &context, Catalog &catalog);
+	static QuackTransaction &Get(ClientContext &context, Catalog &catalog);
 
 private:
-	RpcCatalog &rpc_catalog;
+	QuackCatalog &quack_catalog;
 	case_insensitive_map_t<unique_ptr<CatalogEntry>> catalog_entries;
 };
 
-class RpcTransactionManager : public TransactionManager {
+class QuackTransactionManager : public TransactionManager {
 public:
-	RpcTransactionManager(AttachedDatabase &db_p, RpcCatalog &sqlite_catalog);
+	QuackTransactionManager(AttachedDatabase &db_p, QuackCatalog &sqlite_catalog);
 
 	Transaction &StartTransaction(ClientContext &context) override;
 	ErrorData CommitTransaction(ClientContext &context, Transaction &transaction) override;
@@ -44,19 +45,19 @@ public:
 	void Checkpoint(ClientContext &context, bool force = false) override;
 
 private:
-	RpcCatalog &rpc_catalog;
+	QuackCatalog &quack_catalog;
 	mutex transaction_lock;
-	reference_map_t<Transaction, unique_ptr<RpcTransaction>> transactions;
+	reference_map_t<Transaction, unique_ptr<QuackTransaction>> transactions;
 };
 
-struct RpcSchemaInfo : CreateSchemaInfo {
+struct QuackSchemaInfo : CreateSchemaInfo {
 	string schema_name;
 	string catalog_name;
 };
 
-class RpcTableCatalogEntry : public TableCatalogEntry {
+class QuackTableCatalogEntry : public TableCatalogEntry {
 public:
-	RpcTableCatalogEntry(Catalog &catalog_p, SchemaCatalogEntry &schema_p, CreateTableInfo &info_p)
+	QuackTableCatalogEntry(Catalog &catalog_p, SchemaCatalogEntry &schema_p, CreateTableInfo &info_p)
 	    : TableCatalogEntry(catalog_p, schema_p, info_p) {
 	}
 
@@ -65,9 +66,9 @@ public:
 	TableStorageInfo GetStorageInfo(ClientContext &context) override;
 };
 
-class RpcSchemaCatalogEntry : public SchemaCatalogEntry {
+class QuackSchemaCatalogEntry : public SchemaCatalogEntry {
 public:
-	RpcSchemaCatalogEntry(Catalog &catalog_p, CreateSchemaInfo &info_p) : SchemaCatalogEntry(catalog_p, info_p) {
+	QuackSchemaCatalogEntry(Catalog &catalog_p, CreateSchemaInfo &info_p) : SchemaCatalogEntry(catalog_p, info_p) {
 	}
 
 	void Scan(ClientContext &context, CatalogType type, const std::function<void(CatalogEntry &)> &callback) override;
@@ -102,10 +103,11 @@ private:
 	case_insensitive_map_t<unique_ptr<CatalogEntry>> default_function_map;
 };
 
-class RpcCatalog : public Catalog {
+class QuackCatalog : public Catalog {
 public:
-	explicit RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p, ClientContext &context);
-	~RpcCatalog();
+	explicit QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri_p, ClientContext &context,
+	                      const string &token);
+	~QuackCatalog();
 
 public:
 	string GetCatalogType() override {
@@ -137,17 +139,17 @@ public:
 	string GetDBPath() override;
 
 	unique_ptr<ColumnDataCollection> ExecuteCommand(const string &query);
-	const RpcUri &GetServerUri();
+	const QuackUri &GetServerUri();
 	const string &GetConnectionId();
 
-	RpcClient &GetRawClient();
+	QuackClient &GetRawClient();
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
-	RpcUri server_uri;
-	unique_ptr<RpcClient> client;
+	QuackUri server_uri;
+	unique_ptr<QuackClient> client;
 	string connection_id;
-	unordered_map<string, unique_ptr<RpcSchemaCatalogEntry>> schemas;
+	unordered_map<string, unique_ptr<QuackSchemaCatalogEntry>> schemas;
 };
 
 } // namespace duckdb

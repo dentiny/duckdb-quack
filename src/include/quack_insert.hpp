@@ -13,14 +13,14 @@
 
 namespace duckdb {
 
-class RpcInsert : public PhysicalOperator {
+class QuackInsert : public PhysicalOperator {
 public:
 	//! INSERT INTO
-	RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
-	          physical_index_vector_t<idx_t> column_index_map);
+	QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
+	            physical_index_vector_t<idx_t> column_index_map);
 	//! CREATE TABLE AS
-	RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
-	          unique_ptr<BoundCreateTableInfo> info);
+	QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
+	            unique_ptr<BoundCreateTableInfo> info);
 
 	//! The table to insert into
 	optional_ptr<TableCatalogEntry> table;
@@ -30,17 +30,13 @@ public:
 	unique_ptr<BoundCreateTableInfo> info;
 	//! column_index_map
 	physical_index_vector_t<idx_t> column_index_map;
-	//! Whether or not we can keep the copy alive during Sink calls
+	//! Whether we can keep the copy alive during Sink calls
 	bool keep_copy_alive = true;
 
-public:
+protected:
 	// Source interface
 	SourceResultType GetDataInternal(ExecutionContext &context, DataChunk &chunk,
 	                                 OperatorSourceInput &input) const override;
-
-	bool IsSource() const override {
-		return true;
-	}
 
 public:
 	// Sink interface
@@ -48,6 +44,10 @@ public:
 	SinkResultType Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const override;
 	SinkFinalizeType Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
 	                          OperatorSinkFinalizeInput &input) const override;
+
+	bool IsSource() const override {
+		return true;
+	}
 
 	bool IsSink() const override {
 		return true;

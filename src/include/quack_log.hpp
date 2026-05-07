@@ -1,19 +1,19 @@
 #pragma once
 
 #include "duckdb/logging/log_type.hpp"
-#include "message.hpp"
+#include "quack_message.hpp"
 
 namespace duckdb {
 
-class RPCLogType : public LogType {
+class QuackLogType : public LogType {
 public:
-	static constexpr const char *NAME = "RPC";
+	static constexpr const char *NAME = "Quack";
 	static constexpr LogLevel LEVEL = LogLevel::LOG_DEBUG;
 
-	RPCLogType();
+	QuackLogType();
 
 	static LogicalType GetLogType();
-	static string ConstructLogMessage(MessageType request_type, const string &rpc_connection_id,
+	static string ConstructLogMessage(MessageType request_type, const string &connection_id,
 	                                  optional_idx client_query_id, const string &query, const string &server_uri,
 	                                  int64_t duration_ms, MessageType response_type, const string &error);
 };
