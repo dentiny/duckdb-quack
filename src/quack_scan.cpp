@@ -226,10 +226,8 @@ static string BuildPushdownQuery(const QuackScanBindData &bind_data, const Table
 			}
 			if (col_id.IsVirtualColumn()) {
 				auto virtual_column = col_id.GetPrimaryIndex();
-				if (virtual_column == COLUMN_IDENTIFIER_EMPTY) {
+				if (virtual_column == COLUMN_IDENTIFIER_EMPTY || virtual_column == COLUMN_IDENTIFIER_ROW_ID) {
 					query += "NULL::BIGINT";
-				} else if (virtual_column == COLUMN_IDENTIFIER_ROW_ID) {
-					query += "rowid::BIGINT";
 				} else {
 					throw InternalException("Unsupported virtual column index");
 				}
