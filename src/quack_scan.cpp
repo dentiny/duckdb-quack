@@ -225,12 +225,19 @@ static string BuildPushdownQuery(const QuackScanBindData &bind_data, const Table
 				query += ", ";
 			}
 			if (col_id.IsVirtualColumn()) {
-				query += "NULL";
+				auto virtual_column = col_id.GetPrimaryIndex();
+				if (virtual_column == COLUMN_IDENTIFIER_EMPTY) {
+					query += "NULL::BIGINT";
+				} else if (virtual_column == COLUMN_IDENTIFIER_ROW_ID) {
+					query += "rowid::BIGINT";
+				} else {
+					throw InternalException("Unsupported virtual column index");
+				}
 			} else {
 				query += "#" + to_string(col_id.GetPrimaryIndex() + 1);
 			}
 		}
-		query = "SELECT " + query;
+		query = "SELECT " + query + " ";
 	}
 	// 	vector<string> selected_columns;
 	// 	if (!input.projection_ids.empty()) {
