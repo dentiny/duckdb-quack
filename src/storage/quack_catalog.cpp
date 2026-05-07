@@ -20,26 +20,13 @@
 
 namespace duckdb {
 
-QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri_p, ClientContext &context,
-                           const string &token_p)
-    : Catalog(db_p), server_uri(server_uri_p), client(QuackClient::GetClient(context, server_uri)) {
-	auto &secret_manager = SecretManager::Get(context);
-	auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
-	auto match = secret_manager.LookupSecret(transaction, server_uri.Uri(), "quack");
-	string token = token_p;
-	if (token.empty() && match.HasMatch()) {
-		const auto &kv = dynamic_cast<const KeyValueSecret &>(*match.secret_entry->secret);
-		token = kv.TryGetValue("token", true).ToString();
-	}
-
-	if (token.empty()) {
-		throw InvalidInputException(
-		    "Could not find token for ATTACH 'quack:...' - Please create a secret first or pass directly");
-	}
-
-	auto connection_response =
-	    client->Request<ConnectionResponseMessage>(context, make_uniq<ConnectionRequestMessage>(token));
-	connection_id = connection_response->ConnectionId();
+QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri, ClientContext &context,
+                           const string &token)
+    : Catalog(db_p) {
+	// connect to the server
+	client_connection = QuackClient::ConnectToServer(context, server_uri, token);
+	// create a client connection and keep it stored in the catalog
+	client = client_connection->GetClient(context);
 
 	// load the entire catalog up-front
 	auto load_info = LoadCatalog(context);
@@ -77,7 +64,7 @@ optional_ptr<SchemaCatalogEntry> QuackCatalog::LookupSchema(CatalogTransaction t
 }
 
 const QuackUri &QuackCatalog::GetServerUri() {
-	return server_uri;
+	return client_connection->ServerURI();
 }
 
 unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(const string &query,
@@ -85,7 +72,7 @@ unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(const stri
 	// FIXME this will break with many results!
 	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
 	auto response =
-	    client->Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(connection_id, query));
+	    client->Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(GetConnectionId(), query));
 	chunk_collection->Initialize(response->Types());
 	for (auto &chunk : response->MutableResults()) {
 		chunk_collection->Append(chunk->Chunk());
@@ -93,12 +80,16 @@ unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(const stri
 	return chunk_collection;
 }
 
+shared_ptr<QuackClientConnection> QuackCatalog::GetClient() {
+	return client_connection;
+}
+
 QuackClient &QuackCatalog::GetRawClient() {
 	return *client;
 }
 
 const string &QuackCatalog::GetConnectionId() {
-	return connection_id;
+	return client_connection->ConnectionId();
 }
 
 optional_ptr<CatalogEntry> QuackCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
