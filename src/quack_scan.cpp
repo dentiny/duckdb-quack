@@ -8,7 +8,7 @@
 
 #include "quack_scan.hpp"
 #include "quack_client.hpp"
-#include "quack_catalog.hpp"
+#include "include/storage/quack_catalog.hpp"
 
 #include <queue>
 namespace duckdb {

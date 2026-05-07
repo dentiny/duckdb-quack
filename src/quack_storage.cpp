@@ -4,7 +4,7 @@
 
 #include "quack_storage.hpp"
 #include "quack_server.hpp"
-#include "quack_catalog.hpp"
+#include "include/storage/quack_catalog.hpp"
 
 using namespace duckdb;
 

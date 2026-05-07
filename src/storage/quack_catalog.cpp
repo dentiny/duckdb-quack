@@ -11,9 +11,9 @@
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/storage/database_size.hpp"
 
-#include "quack_catalog.hpp"
+#include "storage/quack_catalog.hpp"
 #include "quack_scan.hpp"
-#include "quack_insert.hpp"
+#include "storage/quack_insert.hpp"
 #include "quack_message.hpp"
 #include "quack_client.hpp"
 
