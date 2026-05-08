@@ -6,13 +6,18 @@
 #include "quack_uri.hpp"
 
 namespace duckdb {
-
 template <class T>
 string GetUriPart(T ele) {
 	if (ele.afterLast - ele.first < 1) {
 		throw InvalidInputException("Invalid URI");
 	}
 	return string(ele.first, ele.afterLast - ele.first);
+}
+
+QuackClient::QuackClient(DatabaseInstance &db_p, const QuackUri &uri_p) : db(db_p), uri(uri_p) {
+}
+
+QuackClient::~QuackClient() {
 }
 
 HttpsQuackClient::HttpsQuackClient(DatabaseInstance &db, const QuackUri &uri_p) : QuackClient(db, uri_p) {};
@@ -130,10 +135,11 @@ unique_ptr<QuackClient> QuackClient::GetClient(ClientContext &context, const Qua
 	return GetClient(*context.db, uri);
 }
 
-QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p)
-    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)) {
+QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p,
+                                             idx_t max_connections_cached)
+    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)), max_connections_cached(max_connections_cached) {
 	if (client_p) {
-		cached_clients.push_back(std::move(client_p));
+		StoreClient(std::move(client_p));
 	}
 }
 
@@ -175,20 +181,40 @@ shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &co
 	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id));
 }
 
-unique_ptr<QuackClient> QuackClientConnection::GetClient(ClientContext &context) const {
+unique_ptr<QuackClientWrapper> QuackClientConnection::GetClient(ClientContext &context) const {
 	lock_guard<mutex> guard(lock);
+	unique_ptr<QuackClient> result;
 	if (!cached_clients.empty()) {
-		auto result = std::move(cached_clients.back());
+		// use client from the cache
+		result = std::move(cached_clients.back());
 		cached_clients.pop_back();
-		return result;
+	} else {
+		// instantiate a new client
+		result = QuackClient::GetClient(context, uri);
 	}
-	// instantiate a new client and return it
-	return QuackClient::GetClient(context, uri);
+	return make_uniq<QuackClientWrapper>(std::move(result), shared_from_this());
 }
 
-void QuackClientConnection::StoreClient(unique_ptr<QuackClient> client_p) {
+void QuackClientConnection::StoreClient(unique_ptr<QuackClient> client_p) const {
 	lock_guard<mutex> guard(lock);
+	if (cached_clients.size() >= max_connections_cached) {
+		// already exceeded max cache size
+		return;
+	}
 	cached_clients.push_back(std::move(client_p));
+}
+
+QuackClientWrapper::QuackClientWrapper(unique_ptr<QuackClient> client_p,
+                                       shared_ptr<const QuackClientConnection> client_connection_p)
+    : client(std::move(client_p)), client_connection(std::move(client_connection_p)) {
+}
+
+QuackClientWrapper::~QuackClientWrapper() {
+	client_connection->StoreClient(std::move(client));
+}
+
+QuackClient &QuackClientWrapper::GetClient() {
+	return *client;
 }
 
 } // namespace duckdb

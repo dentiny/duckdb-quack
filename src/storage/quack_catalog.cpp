@@ -69,15 +69,14 @@ unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(ClientCont
 	// FIXME this will break with many results!
 	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
 	// get a client to query
-	auto client = client_connection->GetClient(context);
+	auto client_wrapper = client_connection->GetClient(context);
+	auto &client = client_wrapper->GetClient();
 	auto response =
-	    client->Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(GetConnectionId(), query));
+	    client.Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(GetConnectionId(), query));
 	chunk_collection->Initialize(response->Types());
 	for (auto &chunk : response->MutableResults()) {
 		chunk_collection->Append(chunk->Chunk());
 	}
-	// move the client back to the connection cache
-	client_connection->StoreClient(std::move(client));
 	return chunk_collection;
 }
 

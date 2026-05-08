@@ -35,6 +35,7 @@ struct QuackConnection {
 class QuackServer {
 public:
 	explicit QuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p);
+	virtual ~QuackServer();
 
 	//! Stop accepting new connections (close the listener socket) without
 	//! joining listener threads. Safe to call from a request-handler thread —
@@ -63,8 +64,6 @@ public:
 	const string &Token() {
 		return token;
 	}
-
-	virtual ~QuackServer();
 
 protected:
 	unique_ptr<QuackMessage> HandleMessage(MemoryStream &read_stream);

@@ -62,9 +62,9 @@ SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 	                                                      std::move(chunk_wrapper));
 
 	auto client_connection = quack_catalog.GetClientConnection();
-	auto client = client_connection->GetClient(context.client);
-	client->Request<SuccessResponse>(context.client, std::move(append_message));
-	client_connection->StoreClient(std::move(client));
+	auto client_wrapper = client_connection->GetClient(context.client);
+	auto &client = client_wrapper->GetClient();
+	client.Request<SuccessResponse>(context.client, std::move(append_message));
 
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;
