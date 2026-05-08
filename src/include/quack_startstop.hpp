@@ -6,12 +6,7 @@ class TableFunction;
 
 class QuackServeFunction {
 public:
-	static TableFunction GetFunction();
-};
-
-class QuackServeFunctionDefaultUri {
-public:
-	static TableFunction GetFunction();
+	static TableFunctionSet GetFunction();
 };
 
 class QuackStopFunction {

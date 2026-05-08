@@ -76,22 +76,17 @@ static void QuackServe(ClientContext &context, TableFunctionInput &data_p, DataC
 	bind_data.finished = true;
 }
 
-TableFunction QuackServeFunction::GetFunction() {
+TableFunctionSet QuackServeFunction::GetFunction() {
+	TableFunctionSet set("quack_serve");
 	auto fun = TableFunction("quack_serve", {LogicalType::VARCHAR}, QuackServe, QuackServeBind);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.named_parameters["allow_other_hostname"] = LogicalType::BOOLEAN;
 	fun.named_parameters["token"] = LogicalType::VARCHAR;
+	set.AddFunction(fun);
+	fun.arguments.clear();
+	set.AddFunction(fun);
 
-	return fun;
-}
-
-// TODO surely there is a better way to do this
-TableFunction QuackServeFunctionDefaultUri::GetFunction() {
-	auto fun = TableFunction("quack_serve", {}, QuackServe, QuackServeBind);
-	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
-	fun.named_parameters["allow_other_hostname"] = LogicalType::BOOLEAN;
-	fun.named_parameters["token"] = LogicalType::VARCHAR;
-	return fun;
+	return set;
 }
 
 static unique_ptr<FunctionData> QuackStopBind(ClientContext &context, TableFunctionBindInput &input,
