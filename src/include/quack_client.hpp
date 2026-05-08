@@ -10,13 +10,12 @@
 
 namespace duckdb {
 class QuackClientConnection;
+struct QuackClientWrapper;
 
 class QuackClient {
 public:
-	explicit QuackClient(DatabaseInstance &db_p, const QuackUri &uri_p) : db(db_p), uri(uri_p) {
-	}
-	virtual ~QuackClient() {
-	}
+	explicit QuackClient(DatabaseInstance &db_p, const QuackUri &uri_p);
+	virtual ~QuackClient();
 
 	template <class TARGET>
 	unique_ptr<TARGET> Request(optional_ptr<ClientContext> context, unique_ptr<QuackMessage> request_message) {
@@ -49,9 +48,10 @@ private:
 	                                                 unique_ptr<QuackMessage> request_message) = 0;
 };
 
-class QuackClientConnection {
+class QuackClientConnection : public enable_shared_from_this<QuackClientConnection> {
 public:
-	explicit QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p);
+	explicit QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p,
+	                               idx_t max_connections_cached = 1);
 	~QuackClientConnection();
 
 	const string &ConnectionId() const {
@@ -62,15 +62,27 @@ public:
 	}
 
 	//! Get a client (either a cached one, or open a new one if required)
-	unique_ptr<QuackClient> GetClient(ClientContext &context) const;
+	unique_ptr<QuackClientWrapper> GetClient(ClientContext &context) const;
 	//! Return a client back to the cache
-	void StoreClient(unique_ptr<QuackClient> client_p);
+	void StoreClient(unique_ptr<QuackClient> client_p) const;
 
 private:
 	QuackUri uri;
 	string connection_id;
 	mutable mutex lock;
 	mutable vector<unique_ptr<QuackClient>> cached_clients;
+	idx_t max_connections_cached;
+};
+
+struct QuackClientWrapper {
+	QuackClientWrapper(unique_ptr<QuackClient> client, shared_ptr<const QuackClientConnection> client_connection);
+	~QuackClientWrapper();
+
+	QuackClient &GetClient();
+
+private:
+	unique_ptr<QuackClient> client;
+	shared_ptr<const QuackClientConnection> client_connection;
 };
 
 class HttpsQuackClient : public QuackClient {

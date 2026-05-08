@@ -43,9 +43,10 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	bind_data->client_connection = QuackClient::ConnectToServer(context, server_uri, token);
 	auto &client_connection = *bind_data->client_connection;
 
-	auto client = client_connection.GetClient(context);
+	auto client_wrapper = client_connection.GetClient(context);
+	auto &client = client_wrapper->GetClient();
 
-	auto bind_response = client->Request<PrepareResponseMessage>(
+	auto bind_response = client.Request<PrepareResponseMessage>(
 	    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query));
 
 	return_types = bind_response->Types();
@@ -53,9 +54,6 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-
-	// store the initial client for later re-use
-	client_connection.StoreClient(std::move(client));
 
 	return bind_data;
 }
@@ -91,10 +89,10 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	auto query = input.inputs[1].GetValue<string>();
 	auto bind_data = make_uniq<QuackScanBindData>();
 	bind_data->client_connection = catalog.GetClientConnection();
-	auto client = bind_data->client_connection->GetClient(context);
-	auto bind_response = client->Request<PrepareResponseMessage>(
+	auto client_wrapper = bind_data->client_connection->GetClient(context);
+	auto &client = client_wrapper->GetClient();
+	auto bind_response = client.Request<PrepareResponseMessage>(
 	    context, make_uniq<PrepareRequestMessage>(bind_data->client_connection->ConnectionId(), query));
-	bind_data->client_connection->StoreClient(std::move(client));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -127,7 +125,7 @@ private:
 };
 
 struct QuackScanLocalState : public LocalTableFunctionState {
-	unique_ptr<QuackClient> client;
+	unique_ptr<QuackClientWrapper> client_wrapper;
 	//! batch_index of the batch that `fetched_results` currently holds chunks from (server-assigned).
 	//! Surfaced to DuckDB via get_partition_data so downstream order-preserving operators
 	//! (CTAS, COPY TO, INSERT SELECT) can run the scan in parallel without losing order.
@@ -249,8 +247,9 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 		// apply pushdown to the query
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto &client_connection = *bind_data.client_connection;
-		auto client = client_connection.GetClient(context);
-		auto response_message = client->Request<PrepareResponseMessage>(
+		auto client_wrapper = client_connection.GetClient(context);
+		auto &client = client_wrapper->GetClient();
+		auto response_message = client.Request<PrepareResponseMessage>(
 		    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query));
 		needs_more_fetch = response_message->NeedsMoreFetch();
 		// fetch the result
@@ -258,7 +257,6 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 			auto &chunk = chunk_ref->Chunk();
 			results.emplace_back(chunk, ChunkResultPushdownType::PUSHDOWN_ALREADY_APPLIED);
 		}
-		client_connection.StoreClient(std::move(client));
 	} else {
 		for (auto &chunk_ref : bind_data.results) {
 			auto &chunk = chunk_ref->Chunk();
@@ -278,7 +276,7 @@ unique_ptr<LocalTableFunctionState> QuackScanInitLocal(ExecutionContext &context
 	auto local_state = make_uniq<QuackScanLocalState>();
 
 	// re-use initial client from bind if possible
-	local_state->client = bind_data.client_connection->GetClient(context.client);
+	local_state->client_wrapper = bind_data.client_connection->GetClient(context.client);
 	auto results = global_state.TryGetResults();
 	for (auto &chunk : results) {
 		local_state->results.push(std::move(chunk));
@@ -320,7 +318,8 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 
 		// if that did not work, we request more results
 		if (local_state.results.empty() && global_state.needs_more_fetch) {
-			auto fetch_response = local_state.client->Request<FetchResponseMessage>(
+			auto &client = local_state.client_wrapper->GetClient();
+			auto fetch_response = client.Request<FetchResponseMessage>(
 			    context, make_uniq<FetchRequestMessage>(bind_data.client_connection->ConnectionId()));
 
 			if (fetch_response->MutableResults().empty()) {
