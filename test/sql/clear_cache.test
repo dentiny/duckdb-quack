@@ -61,13 +61,18 @@ SELECT s FROM rpc.t2 ORDER BY s
 a
 b
 
+statement error con2
+SELECT i FROM rpc.t1
+----
+Invalid Input Error: Table with name t1 does not exist
+
 statement ok con2
 CALL quack_clear_cache()
 
 statement error con2
 SELECT i FROM rpc.t1
 ----
-Table with name t1 does not exist
+Catalog Error: Table with name t1 does not exist
 
 statement ok con2
 detach rpc;
