@@ -126,12 +126,11 @@ DatabaseSize QuackCatalog::GetDatabaseSize(ClientContext &context) {
 	throw NotImplementedException("GetDatabaseSize not implemented yet");
 }
 
-//! Whether or not this is an in-memory SQLite database
 bool QuackCatalog::InMemory() {
-	throw NotImplementedException("InMemory not implemented yet");
+	return false;
 }
 string QuackCatalog::GetDBPath() {
-	throw NotImplementedException("GetDBPath not implemented yet");
+	return client_connection->ServerURI().Uri();
 }
 
 void QuackCatalog::DropSchema(ClientContext &context, DropInfo &info) {
