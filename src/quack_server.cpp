@@ -262,10 +262,11 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		}
 		string session_id = GenerateSessionId();
 		auto auth_result = EvaluateAuthQuery(
-				db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
-				Value(session_id), Value(connection_request_message.AuthString()), Value(Token()));
+		    db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
+		    Value(session_id), Value(connection_request_message.AuthString()), Value(Token()));
 
-		if (auth_result.IsNull() || (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
+		if (auth_result.IsNull() ||
+		    (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
 			return make_uniq<ErrorResponse>("Authentication failed");
 		}
 		return make_uniq<ConnectionResponseMessage>(CreateNewConnection(session_id));
@@ -285,12 +286,12 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		auto auth_result = EvaluateAuthQuery(
 		    db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(db, "quack_authorization_function")),
 		    Value(prepare_request_message.ConnectionId()), Value(prepare_request_message.Query()));
-		if (auth_result.IsNull() || (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
+		if (auth_result.IsNull() ||
+		    (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
 			return make_uniq<ErrorResponse>("Authorization failed");
 		}
-		auto effective_sql = (auth_result.type().id() == LogicalTypeId::VARCHAR)
-		                         ? auth_result.GetValue<string>()
-		                         : prepare_request_message.Query();
+		auto effective_sql = (auth_result.type().id() == LogicalTypeId::VARCHAR) ? auth_result.GetValue<string>()
+		                                                                         : prepare_request_message.Query();
 
 		std::unique_lock<std::mutex> lock(connection.lock);
 		connection.duckdb_query_result.reset();
@@ -377,7 +378,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			auto auth_result = EvaluateAuthQuery(
 			    db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(db, "quack_authorization_function")),
 			    Value(append_request_message.ConnectionId()), Value(dummy_insert_query));
-			if (auth_result.IsNull()|| (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
+			if (auth_result.IsNull() ||
+			    (auth_result.type().id() == LogicalTypeId::BOOLEAN && !auth_result.GetValue<bool>())) {
 				return make_uniq<ErrorResponse>("Authorization failed");
 			}
 		}
