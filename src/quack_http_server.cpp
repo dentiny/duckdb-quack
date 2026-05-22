@@ -39,7 +39,9 @@ HttpQuackServer::~HttpQuackServer() {
 
 void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port) {
 	D_ASSERT(server->server);
-	D_ASSERT(listen_port > 1 && listen_port < 65535);
+	// Ports 1 and 65535 are both valid — the privileged-port rule is a bind()
+	// policy, not a range limit (and does not apply on every platform).
+	D_ASSERT(listen_port >= 1 && listen_port <= 65535);
 	// Socket is already bound (synchronously, in the constructor).
 	// Catch everything so the listener thread never lets an exception escape — that
 	// would call std::terminate and abort the host process.
