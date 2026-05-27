@@ -6,6 +6,9 @@ require quack
 
 require httpfs
 
+statement ok
+SET default_transaction_invalidation_policy='SYNTACTIC_ERRORS_DO_NOT_INVALIDATE';
+
 set ignore_error_messages __none__
 
 statement ok
