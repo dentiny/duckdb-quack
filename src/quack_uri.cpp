@@ -39,16 +39,16 @@ QuackUri::QuackUri(string uri_p, bool ssl_p) : ssl(ssl_p), uri(uri_p) {
 		auto pos = remainder.find(':');
 		auto port_str = remainder.substr(pos + 1);
 		if (port_str.empty()) {
-			throw InvalidInputException("Invalid Port");
+			throw InvalidInputException("Invalid Port \"\"");
 		}
 		int raw_port;
 		try {
 			raw_port = stoi(port_str);
+			if (raw_port < 0 || raw_port > 65535) {
+				throw InvalidInputException("Invalid Port");
+			}
 		} catch (std::exception &) {
-			throw InvalidInputException("Invalid Port");
-		}
-		if (raw_port < 1 || raw_port > 65535) {
-			throw InvalidInputException("Invalid Port");
+			throw InvalidInputException("Invalid Port \"%s\" - must be between 0 and 65535", port_str);
 		}
 		port = raw_port;
 		remainder = remainder.substr(0, pos);

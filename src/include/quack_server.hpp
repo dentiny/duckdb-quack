@@ -74,6 +74,10 @@ public:
 		return uri;
 	}
 
+	uint16_t BoundPort() const {
+		return bound_port;
+	}
+
 	idx_t ActiveConnectionCount() {
 		std::lock_guard<std::mutex> lock(active_connections_mutex);
 		return active_connections.size();
@@ -93,6 +97,7 @@ protected:
 
 	mutex session_id_rng_mutex;
 	shared_ptr<EncryptionState> session_id_rng;
+	uint16_t bound_port;
 
 private:
 	QuackUri uri;
@@ -109,7 +114,7 @@ public:
 	~HttpQuackServer() override;
 
 private:
-	static void ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port);
+	static void ListenThread(HttpQuackServer *server, const string &listen_host, uint16_t listen_port);
 
 	unique_ptr<QuackMessage> ReadMessage(MemoryStream &read_stream);
 

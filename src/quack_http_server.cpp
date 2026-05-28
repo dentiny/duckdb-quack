@@ -37,9 +37,8 @@ HttpQuackServer::~HttpQuackServer() {
 	}
 }
 
-void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port) {
+void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, uint16_t listen_port) {
 	D_ASSERT(server->server);
-	D_ASSERT(listen_port > 1 && listen_port < 65535);
 	// Socket is already bound (synchronously, in the constructor).
 	// Catch everything so the listener thread never lets an exception escape — that
 	// would call std::terminate and abort the host process.
@@ -97,15 +96,23 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 	}
 	is_running = true;
 
-	// Bind synchronously here so that bind() failures (e.g. EADDRINUSE)
-	// propagate to the caller of quack_serve()
-	if (!server->bind_to_port(uri_p.Host(), uri_p.Port())) {
+	bool success;
+	if (uri_p.Port() == 0) {
+		int actual_port = server->bind_to_any_port(uri_p.Host());
+		success = actual_port >= 0;
+		if (success) {
+			bound_port = NumericCast<uint16_t>(actual_port);
+		}
+	} else {
+		success =  server->bind_to_port(uri_p.Host(), uri_p.Port());
+	}
+	if (!success) {
 		throw IOException("Failed to bind DuckDB Quack RPC server to %s (address in use, permission denied, "
 		                  "or invalid host/port)",
 		                  uri_p.Http());
 	}
 
-	listen_threads.push_back(std::thread(ListenThread, this, uri_p.Host(), uri_p.Port()));
+	listen_threads.push_back(std::thread(ListenThread, this, uri_p.Host(), BoundPort()));
 }
 
 } // namespace duckdb

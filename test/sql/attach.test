@@ -6,7 +6,12 @@ require quack
 
 require httpfs
 
+test-env QUACK_SERVER quack:localhost
+
 set ignore_error_messages __none__
+
+statement ok
+SET default_transaction_invalidation_policy='SYNTACTIC_ERRORS_DO_NOT_INVALIDATE';
 
 statement ok
 create schema moo;
@@ -17,11 +22,10 @@ create table fuu as values(42, 43);
 statement ok
 create table moo.fuu2 as values(44, 45);
 
-foreach server 'quack:localhost'
+statement ok
+set variable listen_uri = (select list(concat('''{QUACK_SERVER}', ':', port, '''')) from quack_serve('{QUACK_SERVER}:0', token='asdf'));
 
-
-statement ok con1
-call quack_serve({server}, token='asdf');
+foreach server <variable:listen_uri>
 
 query II con2
 from quack_query({server}, 'select 42, 43', token='asdf')
@@ -140,7 +144,7 @@ detach rpc;
 database not found
 
 statement ok con1
-call quack_stop({server});
+call quack_stop('{QUACK_SERVER}:0');
 
 statement error con2
 attach {server} as rpc

@@ -41,9 +41,11 @@ static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunc
 	return_types.emplace_back(LogicalType::VARCHAR);
 	return_types.emplace_back(LogicalType::VARCHAR);
 	return_types.emplace_back(LogicalType::VARCHAR);
+	return_types.emplace_back(LogicalType::USMALLINT);
 	names.emplace_back("listen_uri");
 	names.emplace_back("listen_url");
 	names.emplace_back("auth_token");
+	names.emplace_back("port");
 
 	// Every server has a token: either user-supplied or auto-generated. The
 	// authn callback (default token-check or a user-defined function) decides
@@ -66,10 +68,11 @@ static void QuackServe(ClientContext &context, TableFunctionInput &data_p, DataC
 		return;
 	}
 
-	QuackStorageExtensionInfo::GetState(*context.db).CreateServer(context, bind_data.listen_uri, bind_data.token);
+	auto &server = QuackStorageExtensionInfo::GetState(*context.db).CreateServer(context, bind_data.listen_uri, bind_data.token);
 	output.SetValue(0, 0, bind_data.listen_uri.Uri());
 	output.SetValue(1, 0, bind_data.listen_uri.Http());
 	output.SetValue(2, 0, bind_data.token);
+	output.SetValue(3, 0, Value::USMALLINT(server.BoundPort()));
 
 	output.SetCardinality(1);
 	bind_data.finished = true;

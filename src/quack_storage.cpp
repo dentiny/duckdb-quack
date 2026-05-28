@@ -42,7 +42,7 @@ vector<QuackStorageExtensionInfo::ServerSnapshot> QuackStorageExtensionInfo::Lis
 		snap.listen_uri = uri.Uri();
 		snap.listen_url = uri.Http();
 		snap.host = uri.Host();
-		snap.port = uri.Port();
+		snap.port = kv.second->BoundPort();
 		snap.active_connections = kv.second->ActiveConnectionCount();
 		snap.info.emplace_back("ipv6", uri.IPv6() ? "true" : "false");
 		result.push_back(std::move(snap));
