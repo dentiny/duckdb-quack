@@ -2,7 +2,12 @@
 
 namespace duckdb {
 
-QuackUri::QuackUri(string uri_p, bool ssl_p) : ssl(ssl_p), uri(uri_p) {
+QuackUri::QuackUri(const QuackUri &input_p, uint16_t new_port)
+    : ssl(input_p.Ssl()), ipv6(input_p.IPv6()), host(input_p.Host()), port(new_port), http(input_p.Http()) {
+	uri = CanonicalUri();
+}
+
+QuackUri::QuackUri(string uri_p, bool ssl_p) : ssl(ssl_p), uri(std::move(uri_p)) {
 	// we should really instantiate a parser here instead, but alas
 	// whitespace be gone
 	ipv6 = false;

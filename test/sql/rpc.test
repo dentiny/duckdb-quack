@@ -6,10 +6,7 @@ require quack
 
 require httpfs
 
-set ignore_error_messages __none__
-
 foreach server 'quack:localhost'
-
 
 query III con1
 call quack_serve({server}, token='asdf');

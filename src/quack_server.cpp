@@ -28,7 +28,7 @@ void QuackServer::ValidateToken(const string &token) {
 }
 
 QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p)
-    : db_ptr(context_p.db), bound_port(uri_p.Port()), uri(uri_p), token(token_p) {
+    : db_ptr(context_p.db), uri(uri_p), token(token_p) {
 	ValidateToken(token);
 }
 

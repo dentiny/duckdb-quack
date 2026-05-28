@@ -1,0 +1,13 @@
+require quack
+
+require httpfs
+
+test-env QUACK_SERVER quack:localhost
+
+statement ok quack_db:quack_server_con
+set variable actual_listen_uri = (select listen_uri from quack_serve('{QUACK_SERVER}:0', token='asdf'));
+
+query I quack_db:quack_server_con
+set variable listen_uri = concat('''', getvariable('actual_listen_uri'), '''');
+
+set variable server <variable:quack_server_con:listen_uri>

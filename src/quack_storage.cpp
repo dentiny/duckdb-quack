@@ -20,14 +20,15 @@ QuackStorageExtensionInfo &QuackStorageExtensionInfo::GetState(const DatabaseIns
 
 QuackServer &QuackStorageExtensionInfo::CreateServer(ClientContext &context, const QuackUri &listen_uri,
                                                      const string &token) {
-	auto key = listen_uri.CanonicalUri();
+	auto server = make_uniq<HttpQuackServer>(context, listen_uri, token);
+
+	auto &actual_uri = server->ListenUri();
+	auto key = actual_uri.CanonicalUri();
 	std::lock_guard<std::mutex> lock(servers_mutex);
 	auto it = servers.find(key);
 	if (it != servers.end()) {
 		throw InvalidInputException("Server already exists for %s", key);
 	}
-	unique_ptr<QuackServer> server;
-	server = make_uniq<HttpQuackServer>(context, listen_uri, token);
 	servers.emplace(key, std::move(server));
 	return *servers[key];
 }
@@ -42,7 +43,7 @@ vector<QuackStorageExtensionInfo::ServerSnapshot> QuackStorageExtensionInfo::Lis
 		snap.listen_uri = uri.Uri();
 		snap.listen_url = uri.Http();
 		snap.host = uri.Host();
-		snap.port = kv.second->BoundPort();
+		snap.port = uri.Port();
 		snap.active_connections = kv.second->ActiveConnectionCount();
 		snap.info.emplace_back("ipv6", uri.IPv6() ? "true" : "false");
 		result.push_back(std::move(snap));

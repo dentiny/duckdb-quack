@@ -101,10 +101,11 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 		int actual_port = server->bind_to_any_port(uri_p.Host());
 		success = actual_port >= 0;
 		if (success) {
-			bound_port = NumericCast<uint16_t>(actual_port);
+			auto bound_port = NumericCast<uint16_t>(actual_port);
+			uri = QuackUri(uri_p, bound_port);
 		}
 	} else {
-		success =  server->bind_to_port(uri_p.Host(), uri_p.Port());
+		success = server->bind_to_port(uri_p.Host(), uri_p.Port());
 	}
 	if (!success) {
 		throw IOException("Failed to bind DuckDB Quack RPC server to %s (address in use, permission denied, "
@@ -112,7 +113,7 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 		                  uri_p.Http());
 	}
 
-	listen_threads.push_back(std::thread(ListenThread, this, uri_p.Host(), BoundPort()));
+	listen_threads.emplace_back(ListenThread, this, uri.Host(), uri.Port());
 }
 
 } // namespace duckdb

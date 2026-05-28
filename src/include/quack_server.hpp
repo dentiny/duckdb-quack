@@ -74,10 +74,6 @@ public:
 		return uri;
 	}
 
-	uint16_t BoundPort() const {
-		return bound_port;
-	}
-
 	idx_t ActiveConnectionCount() {
 		std::lock_guard<std::mutex> lock(active_connections_mutex);
 		return active_connections.size();
@@ -97,10 +93,10 @@ protected:
 
 	mutex session_id_rng_mutex;
 	shared_ptr<EncryptionState> session_id_rng;
-	uint16_t bound_port;
+
+	QuackUri uri;
 
 private:
-	QuackUri uri;
 	string token;
 };
 
