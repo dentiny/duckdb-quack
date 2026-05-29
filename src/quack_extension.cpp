@@ -13,6 +13,7 @@
 #include "storage/quack_optimizer.hpp"
 
 #include "include/storage/quack_catalog.hpp"
+#include "quack_activity.hpp"
 #include "quack_clear_cache.hpp"
 #include "quack_extension.hpp"
 #include "quack_log.hpp"
@@ -120,6 +121,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(QuackServerListFunction::GetFunction());
 	loader.RegisterFunction(QuackClearCacheFunction::GetFunction());
 	loader.RegisterFunction(GetQuackIdentifyFunction());
+	loader.RegisterFunction(QuacktivityFunction::GetFunction());
 
 	// the default authentication function
 	ScalarFunction quack_check_token("quack_check_token",
