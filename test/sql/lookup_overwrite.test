@@ -2,31 +2,18 @@
 # description: test that multiple LookupEntry calls don't overwrite each other's results
 # group: [sql]
 
-require quack
+include test/template/quack_setup.test_template
 
-require httpfs
-
-set ignore_error_messages __none__
-
-statement ok con1
+statement ok quack_db:quack_server_con
 create table t1 as select range i from range(100);
 
-statement ok con1
+statement ok quack_db:quack_server_con
 create table t2 as select range j from range(200);
 
-foreach server 'quack:localhost'
-
-foreach ssl true
-
-statement ok con1
-call quack_serve({server}, token='asdf');
-
-
-statement ok con2
+statement ok
 create secret (type quack, token 'asdf')
 
-
-statement ok con2
+statement ok
 attach {server} as rpc
 
 # Single table scan should work
@@ -48,12 +35,7 @@ select count(t1.i), count(t2.j) from rpc.main.t1, rpc.main.t2;
 ----
 not currently supported
 
-statement ok con2
+statement ok
 detach rpc;
 
-statement ok con1
-call quack_stop({server});
-
-endloop
-
-endloop
+include test/template/quack_teardown.test_template

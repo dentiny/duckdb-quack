@@ -92,6 +92,7 @@ void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	write_stream.Rewind();
 	SerializationOptions options;
 	options.storage_compatibility = StorageCompatibility::FromIndex(StorageVersion::V1_5_0);
+
 	BinarySerializer serializer(write_stream, options);
 
 	// write the header
