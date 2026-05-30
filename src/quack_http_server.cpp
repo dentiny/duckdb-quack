@@ -11,10 +11,15 @@ namespace duckdb {
 void HttpQuackServer::StopAccepting() {
 	// Closes the listening socket only. Idempotent. Safe to call from a
 	// request-handler thread.
-	if (is_running) {
+	lock_guard<mutex> guard(state_lock);
+	if (server_state == QuackServerState::RUNNING) {
+		// server is running - stop it and decommission
+		server->wait_until_ready();
 		server->stop();
-		is_running = false;
+		server->decommission();
 	}
+	// close the server
+	server_state = QuackServerState::CLOSED;
 }
 
 void HttpQuackServer::Close() {
@@ -42,10 +47,17 @@ void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen
 	// Socket is already bound (synchronously, in the constructor).
 	// Catch everything so the listener thread never lets an exception escape — that
 	// would call std::terminate and abort the host process.
+	{
+		lock_guard<mutex> guard(server->state_lock);
+		if (server->server_state != QuackServerState::WAITING_TO_START) {
+			return;
+		}
+		server->server_state = QuackServerState::RUNNING;
+	}
 	try {
 		server->server->listen_after_bind();
 	} catch (...) {
-		server->is_running = false;
+		server->server_state = QuackServerState::CLOSED;
 	}
 }
 
@@ -94,7 +106,6 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 	if (!server->is_valid()) {
 		throw IOException("Failed to instantiate DuckDB server at %s / %s", uri_p.Uri(), uri_p.Http());
 	}
-	is_running = true;
 
 	bool success;
 	if (uri_p.Port() == 0) {
@@ -113,6 +124,7 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 		                  uri_p.Http());
 	}
 
+	server_state = QuackServerState::WAITING_TO_START;
 	listen_threads.emplace_back(ListenThread, this, uri.Host(), uri.Port());
 }
 

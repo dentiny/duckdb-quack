@@ -34,6 +34,8 @@ struct QuackConnection {
 	string session_id;
 };
 
+enum class QuackServerState { UNINITIALIZED, WAITING_TO_START, RUNNING, CLOSED };
+
 class QuackServer {
 public:
 	static constexpr const idx_t QUACK_VERSION = 1;
@@ -115,7 +117,8 @@ private:
 	unique_ptr<QuackMessage> ReadMessage(MemoryStream &read_stream);
 
 	unique_ptr<duckdb_httplib::Server> server;
-	bool is_running = false;
+	mutex state_lock;
+	atomic<QuackServerState> server_state {QuackServerState::UNINITIALIZED};
 };
 
 } // namespace duckdb
