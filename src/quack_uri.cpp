@@ -3,7 +3,7 @@
 namespace duckdb {
 
 QuackUri::QuackUri(const QuackUri &input_p, uint16_t new_port)
-    : ssl(input_p.Ssl()), ipv6(input_p.IPv6()), host(input_p.Host()), port(new_port), http(input_p.Http()) {
+    : ssl(input_p.Ssl()), ipv6(input_p.IPv6()), host(input_p.Host()), port(new_port) {
 	uri = CanonicalUri();
 }
 
@@ -62,7 +62,10 @@ QuackUri::QuackUri(string uri_p, bool ssl_p) : ssl(ssl_p), uri(std::move(uri_p))
 	if (!ipv6) {
 		host = remainder;
 	}
-	http = StringUtil::Format("http%s://%s:%d", ssl ? "s" : "", ipv6 ? "[" + host + "]" : host, port);
+}
+
+string QuackUri::Http() const {
+	return StringUtil::Format("http%s://%s:%d", ssl ? "s" : "", ipv6 ? "[" + host + "]" : host, port);
 }
 
 static void QuackUriParser(const DataChunk &args, ExpressionState &, Vector &result) {
