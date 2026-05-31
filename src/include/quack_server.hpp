@@ -47,6 +47,8 @@ struct QuackConnectionSnapshot {
 	timestamp_t query_started_at {0};
 };
 
+enum class QuackServerState { UNINITIALIZED, WAITING_TO_START, RUNNING, CLOSED };
+
 class QuackServer {
 public:
 	static constexpr const idx_t QUACK_VERSION = 1;
@@ -109,8 +111,9 @@ protected:
 	mutex session_id_rng_mutex;
 	shared_ptr<EncryptionState> session_id_rng;
 
-private:
 	QuackUri uri;
+
+private:
 	string token;
 };
 
@@ -124,12 +127,13 @@ public:
 	~HttpQuackServer() override;
 
 private:
-	static void ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port);
+	static void ListenThread(HttpQuackServer *server, const string &listen_host, uint16_t listen_port);
 
 	unique_ptr<QuackMessage> ReadMessage(MemoryStream &read_stream);
 
 	unique_ptr<duckdb_httplib::Server> server;
-	bool is_running = false;
+	mutex state_lock;
+	atomic<QuackServerState> server_state {QuackServerState::UNINITIALIZED};
 };
 
 } // namespace duckdb

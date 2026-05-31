@@ -91,7 +91,8 @@ const char *EnumUtil::ToChars<MessageType>(MessageType value) {
 void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	write_stream.Rewind();
 	SerializationOptions options;
-	options.serialization_compatibility = SerializationCompatibility::FromIndex(7);
+	options.storage_compatibility = StorageCompatibility::FromIndex(StorageVersion::V1_5_0);
+
 	BinarySerializer serializer(write_stream, options);
 
 	// write the header
