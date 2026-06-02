@@ -142,12 +142,11 @@ unique_ptr<TableRef> QuackCatalog::RemoteExecute(ClientContext &context, const s
 	return func_ref;
 }
 
-//! Whether or not this is an in-memory SQLite database
 bool QuackCatalog::InMemory() {
-	throw NotImplementedException("InMemory not implemented yet");
+	return false;
 }
 string QuackCatalog::GetDBPath() {
-	throw NotImplementedException("GetDBPath not implemented yet");
+	return client_connection->ServerURI().Uri();
 }
 
 void QuackCatalog::DropSchema(ClientContext &context, DropInfo &info) {
