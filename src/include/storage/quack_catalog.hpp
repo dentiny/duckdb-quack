@@ -55,7 +55,7 @@ public:
 	string GetDBPath() override;
 
 	bool Supports(RemoteCapability capability) const override {
-		switch(capability) {
+		switch (capability) {
 		case RemoteCapability::IS_REMOTE:
 		case RemoteCapability::EXECUTE_QUERY_NODE:
 		case RemoteCapability::CONNECT:
