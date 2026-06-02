@@ -64,7 +64,7 @@ static void QuackActivityScan(ClientContext &context, TableFunctionInput &input,
 		}
 		row++;
 	}
-	output.SetCardinality(row);
+	output.SetChildCardinality(row);
 	data.finished = true;
 }
 
