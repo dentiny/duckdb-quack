@@ -8,6 +8,7 @@
 #include "quack_scan.hpp"
 #include "quack_client.hpp"
 #include "include/storage/quack_catalog.hpp"
+#include "storage/quack_transaction.hpp"
 
 #include <queue>
 namespace duckdb {
@@ -82,11 +83,23 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("catalog_name and query parameters cannot be NULL");
 	}
+	bool use_transaction = false;
+	auto entry = input.named_parameters.find("use_transaction");
+	if (entry != input.named_parameters.end()) {
+		if (entry->second.IsNull()) {
+			throw InvalidInputException("use_transaction cannot be null");
+		}
+		use_transaction = BooleanValue::Get(entry->second);
+	}
 
 	auto &catalog = GetQuackCatalog(context, input.inputs[0]);
+	if (use_transaction) {
+		// start a transaction if "use_transaction" is specified
+		auto &transaction = QuackTransaction::Get(context, catalog);
+		transaction.ForceStart();
+	}
 
 	// TODO some of this stuff below is duplicated af
-
 	auto query = input.inputs[1].GetValue<string>();
 	auto bind_data = make_uniq<QuackScanBindData>();
 	bind_data->client_connection = catalog.GetClientConnection();
@@ -404,6 +417,7 @@ TableFunction QuackScanByNameFunction::GetFunction() {
 	fun.serialize = QuackScanSerialize;
 	fun.deserialize = QuackScanDeserialize;
 	fun.get_bind_info = QuackScanGetBindInfo;
+	fun.named_parameters["use_transaction"] = LogicalType::BOOLEAN;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;
