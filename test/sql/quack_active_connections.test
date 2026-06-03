@@ -1,4 +1,4 @@
-# name: test/sql/quack_activity.test
+# name: test/sql/quack_active_connections.test
 # description: test quacktivity function for the quack extension
 # group: [sql]
 
@@ -18,7 +18,7 @@ call quack_serve({server}, token='asdf');
 
 # no connections yet
 query I con1
-select count(*) from quack_activity();
+select count(*) from quack_active_connections();
 ----
 0
 
@@ -27,7 +27,7 @@ statement ok con2
 attach {server} as rpc2 (token 'asdf');
 
 query I con1
-select state from quack_activity();
+select state from quack_active_connections();
 ----
 finished
 
@@ -39,12 +39,12 @@ from rpc2.fuu;
 42	43
 
 query I con1
-select count(*) from quack_activity();
+select count(*) from quack_active_connections();
 ----
 1
 
 query I con1
-select starts_with(query, 'SELECT') from quack_activity();
+select starts_with(query, 'SELECT') from quack_active_connections();
 ----
 true
 
@@ -55,7 +55,7 @@ statement ok con1
 attach {server} as rpc3 (token 'asdf');
 
 query I con1
-select count(*) from quack_activity();
+select count(*) from quack_active_connections();
 ----
 2
 
@@ -63,7 +63,7 @@ statement ok con1
 detach rpc3;
 
 query I con1
-select count(*) from quack_activity();
+select count(*) from quack_active_connections();
 ----
 1
 
@@ -72,7 +72,7 @@ statement ok con2
 detach rpc2;
 
 query I con1
-select count(*) from quack_activity();
+select count(*) from quack_active_connections();
 ----
 0
 
