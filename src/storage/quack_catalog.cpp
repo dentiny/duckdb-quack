@@ -137,6 +137,9 @@ unique_ptr<TableRef> QuackCatalog::RemoteExecute(ClientContext &context, const s
 	vector<unique_ptr<ParsedExpression>> args;
 	args.push_back(make_uniq<ConstantExpression>(Value(GetName())));
 	args.push_back(make_uniq<ConstantExpression>(Value(sql)));
+	auto use_transaction = make_uniq<ConstantExpression>(Value::BOOLEAN(true));
+	use_transaction->SetAlias("use_transaction");
+	args.push_back(std::move(use_transaction));
 	auto func_ref = make_uniq<TableFunctionRef>();
 	func_ref->function = make_uniq<FunctionExpression>("quack_query_by_name", std::move(args));
 	return func_ref;
