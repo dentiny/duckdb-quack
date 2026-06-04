@@ -60,24 +60,6 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	return bind_data;
 }
 
-QuackCatalog &GetQuackCatalog(ClientContext &context, Value &catalog_name) {
-	if (catalog_name.IsNull()) {
-		throw BinderException("Catalog cannot be NULL");
-	}
-	// look up the database to query
-	auto db_name = catalog_name.GetValue<string>();
-	auto &db_manager = DatabaseManager::Get(context);
-	auto db = db_manager.GetDatabase(context, db_name);
-	if (!db) {
-		throw BinderException("Failed to find attached database \"%s\"", db_name);
-	}
-	auto &catalog = db->GetCatalog();
-	if (catalog.GetCatalogType() != "quack") {
-		throw BinderException("Attached database \"%s\" does not refer to a RPC database", db_name);
-	}
-	return catalog.Cast<QuackCatalog>();
-}
-
 static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context, TableFunctionBindInput &input,
                                                          vector<LogicalType> &return_types, vector<string> &names) {
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
@@ -92,7 +74,7 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 		use_transaction = BooleanValue::Get(entry->second);
 	}
 
-	auto &catalog = GetQuackCatalog(context, input.inputs[0]);
+	auto &catalog = QuackCatalog::GetQuackCatalog(context, input.inputs[0]);
 	if (use_transaction) {
 		// start a transaction if "use_transaction" is specified
 		auto &transaction = QuackTransaction::Get(context, catalog);

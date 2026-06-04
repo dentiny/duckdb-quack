@@ -96,6 +96,24 @@ const string &QuackCatalog::GetConnectionId() {
 	return client_connection->ConnectionId();
 }
 
+QuackCatalog &QuackCatalog::GetQuackCatalog(ClientContext &context, Value &catalog_name) {
+	if (catalog_name.IsNull()) {
+		throw BinderException("Catalog cannot be NULL");
+	}
+	// look up the database to query
+	auto db_name = catalog_name.GetValue<string>();
+	auto &db_manager = DatabaseManager::Get(context);
+	auto db = db_manager.GetDatabase(context, db_name);
+	if (!db) {
+		throw BinderException("Failed to find attached database \"%s\"", db_name);
+	}
+	auto &catalog = db->GetCatalog();
+	if (catalog.GetCatalogType() != "quack") {
+		throw BinderException("Attached database \"%s\" does not refer to a Quack database", db_name);
+	}
+	return catalog.Cast<QuackCatalog>();
+}
+
 optional_ptr<CatalogEntry> QuackCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
 	auto &quack_transaction = QuackTransaction::Get(transaction);
 	// create schema remotely
