@@ -84,9 +84,8 @@ static void QuackDummyAuthorization(const DataChunk &args, ExpressionState &, Ve
 }
 
 static void QuackConnectionIdFunc(const DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &context = state.GetContext();
-	auto catalog_val = args.GetValue(0, 0);
-	auto &quack_catalog = QuackCatalog::GetQuackCatalog(context, catalog_val);
+	auto catalog_name = args.GetValue(0, 0);
+	auto &quack_catalog = QuackCatalog::GetQuackCatalog( state.GetContext(), catalog_name);
 	result.SetValue(0, Value(quack_catalog.GetConnectionId()));
 }
 
