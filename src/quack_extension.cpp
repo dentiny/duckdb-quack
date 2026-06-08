@@ -83,6 +83,12 @@ static void QuackDummyAuthorization(const DataChunk &args, ExpressionState &, Ve
 	result.SetValue(0, args.GetValue(1, 0)); // choose life
 }
 
+static void QuackConnectionIdFunc(const DataChunk &args, ExpressionState &state, Vector &result) {
+	auto catalog_name = args.GetValue(0, 0);
+	auto &quack_catalog = QuackCatalog::GetQuackCatalog(state.GetContext(), catalog_name);
+	result.SetValue(0, Value(quack_catalog.GetConnectionId()));
+}
+
 static void QuackIdentifyFun(ClientContext &, TableFunctionInput &, DataChunk &) {
 	// No-op: side effects are in bind.
 }
@@ -136,6 +142,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                                 LogicalType::VARCHAR, QuackDummyAuthorization);
 	rpc_authorization.SetVolatile();
 	loader.RegisterFunction(rpc_authorization);
+
+	ScalarFunction quack_connection_id("quack_connection_id", {LogicalType::VARCHAR}, LogicalType::VARCHAR,
+	                                   QuackConnectionIdFunc);
+	quack_connection_id.SetVolatile();
+	loader.RegisterFunction(quack_connection_id);
 
 	loader.RegisterFunction(QuackParseUriFunction::GetFunction());
 
