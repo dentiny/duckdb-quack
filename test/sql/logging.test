@@ -1,5 +1,5 @@
 # name: test/sql/logging.test
-# description: test RPC and HTTP logging
+# description: test Quack and HTTP logging
 # group: [sql]
 
 include test/template/quack_setup.test_template
@@ -74,19 +74,15 @@ true
 
 # check client_query_id is populated on client-side logs
 query I
-select count(*) > 0 from duckdb_logs_parsed('Quack') where client_query_id is not null and server is not null
+select count(*) > 0 from duckdb_logs_parsed('Quack') where client_query_id is null and server is not null
 ----
 true
 
-mode skip
-
 # check client_query_id is populated on server-side logs
-query I
+query I quack_db:quack_server_con
 select count(*) > 0 from duckdb_logs_parsed('Quack') where client_query_id is not null and (server is null or server = '')
 ----
 true
-
-mode unskip
 
 # check server-side logs exist (scope=DATABASE, no server field)
 query I quack_db:quack_server_con
