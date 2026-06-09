@@ -38,7 +38,7 @@ SELECT sleep_ms(100);
 onlyif threadid=1
 statement ok
 SET VARIABLE conn_id = (
-  SELECT connection_id FROM quack_activity()
+  SELECT connection_id FROM quack_active_connections()
   WHERE state = 'active' LIMIT 1
 );
 
@@ -49,7 +49,7 @@ FROM quack_cancel('remote2', getvariable('conn_id'));
 endloop
 
 query I
-SELECT count(state) FROM quack_activity() where state = 'cancelled';
+SELECT count(state) FROM quack_active_connections() where state = 'cancelled';
 ----
 1
 
