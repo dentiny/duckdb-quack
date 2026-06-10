@@ -28,7 +28,7 @@ CALL enable_logging('Quack');
 loop i 0 10
 
 statement ok
-from quack_query_by_name('rpc','
+from rpc.query('
 BEGIN;
 UPDATE pgbench_accounts SET abalance = abalance + 2655 WHERE aid = 5445192;
 SELECT abalance FROM pgbench_accounts WHERE aid = 5445192;
