@@ -34,7 +34,11 @@ struct QuackScanBindData : FunctionData {
 
 	~QuackScanBindData() override {
 		if (!completed && query_uuid != hugeint_t {0, 0}) {
-			client_connection->CancelQuery(query_uuid);
+			try {
+				client_connection->CancelQuery(query_uuid);
+			} catch (...) {
+				// server may already be gone
+			}
 		}
 	}
 };
