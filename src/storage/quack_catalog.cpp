@@ -103,7 +103,7 @@ QuackCatalog &QuackCatalog::GetQuackCatalog(ClientContext &context, Value &catal
 	// look up the database to query
 	auto db_name = catalog_name.GetValue<string>();
 	auto &db_manager = DatabaseManager::Get(context);
-	auto db = db_manager.GetDatabase(context, db_name);
+	auto db = db_manager.GetDatabase(context, Identifier(db_name));
 	if (!db) {
 		throw BinderException("Failed to find attached database \"%s\"", db_name);
 	}

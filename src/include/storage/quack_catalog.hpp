@@ -66,6 +66,9 @@ public:
 	}
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) override;
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, const string &sql) override;
+	string GetConnectDisplay() override {
+		return GetDBPath();
+	}
 
 	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(ClientContext &context, const string &query);
 	const QuackUri &GetServerUri();
