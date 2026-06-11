@@ -175,4 +175,19 @@ void QuackCatalog::DropSchema(ClientContext &context, DropInfo &info) {
 	throw NotImplementedException("DropSchema not implemented yet");
 }
 
+bool QuackCatalog::SupportsPushdown(const TableRef &ref) {
+	if (ref.type != TableReferenceType::TABLE_FUNCTION) {
+		return true;
+	}
+	auto &table_func_ref = ref.Cast<TableFunctionRef>();
+	if (table_func_ref.function->GetExpressionClass() != ExpressionClass::FUNCTION) {
+		return true;
+	}
+	auto &func_expr = table_func_ref.function->Cast<FunctionExpression>();
+	if (func_expr.FunctionName() == "query") {
+		return false;
+	}
+	return true;
+}
+
 } // namespace duckdb
