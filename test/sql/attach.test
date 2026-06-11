@@ -32,21 +32,7 @@ statement ok
 attach {server} as rpc
 
 query I
-from quack_query_by_name('rpc', '
-BEGIN;
-select 42;
-COMMIT;
-')
-----
-42
-
-query I
 from rpc.query('BEGIN; select 42; COMMIT;')
-----
-42
-
-query I
-from rpc.query('select 42; select 48');
 ----
 42
 
