@@ -2,17 +2,11 @@
 
 #include <thread>
 
-#ifdef _WIN32
-#include <mutex>
-#include <vector>
-#include <unordered_map>
-#include <atomic>
-#include <memory>
-#include <string>
-#endif
-
+#include "duckdb/common/atomic.hpp"
+#include "duckdb/common/mutex.hpp"
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/shared_ptr.hpp"
+#include "duckdb/common/unordered_map.hpp"
 
 #include "quack_uri.hpp"
 
