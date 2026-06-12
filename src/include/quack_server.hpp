@@ -2,6 +2,15 @@
 
 #include <thread>
 
+#ifdef _WIN32
+#include <mutex>
+#include <vector>
+#include <unordered_map>
+#include <atomic>
+#include <memory>
+#include <string>
+#endif
+
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/shared_ptr.hpp"
 
