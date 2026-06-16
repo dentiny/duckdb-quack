@@ -56,6 +56,7 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
+	bind_data->query_uuid = bind_response->QueryUUID();
 
 	return bind_data;
 }
