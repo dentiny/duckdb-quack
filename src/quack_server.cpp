@@ -328,7 +328,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 				connection.sql_query = "";
 				auto response = make_uniq<ErrorResponse>(query_result->GetErrorObject());
 				connection.duckdb_query_result.reset();
-				connection.query_state = QuackQueryState::ERROR;
+				connection.query_state = QuackQueryState::QUACK_ERROR;
 				return make_uniq<ErrorResponse>("Query did not return any columns");
 			}
 

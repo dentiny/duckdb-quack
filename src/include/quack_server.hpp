@@ -23,7 +23,7 @@ class DatabaseInstance;
 class PreparedStatement;
 class EncryptionState;
 
-enum class QuackQueryState : uint8_t { IDLE, ACTIVE, FINISHED, CANCELLED, ERROR };
+enum class QuackQueryState : uint8_t { IDLE, ACTIVE, FINISHED, CANCELLED, QUACK_ERROR };
 
 struct QuackConnection {
 	explicit QuackConnection(string session_id_p);
