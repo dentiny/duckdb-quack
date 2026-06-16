@@ -98,6 +98,7 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	// new stuff
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
+	bind_data->query_uuid = bind_response->QueryUUID();
 	return bind_data;
 }
 
@@ -286,7 +287,7 @@ unique_ptr<LocalTableFunctionState> QuackScanInitLocal(ExecutionContext &context
 }
 
 static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
-	auto &bind_data = input.bind_data->Cast<QuackScanBindData>();
+	auto &bind_data = input.bind_data->CastNoConst<QuackScanBindData>();
 	auto &global_state = input.global_state->Cast<QuackScanGlobalState>();
 	auto &local_state = input.local_state->Cast<QuackScanLocalState>();
 
@@ -327,6 +328,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 			if (fetch_response->MutableResults().empty()) {
 				// server is done, we are done
 				global_state.needs_more_fetch = false;
+				bind_data.completed = true;
 				return;
 			}
 			// set up buffer for scan in next iteration
@@ -337,6 +339,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 			continue;
 		}
 		// we did not have anything cached and then request to the server did not yield anything - we are done
+		bind_data.completed = true;
 		break;
 	}
 }

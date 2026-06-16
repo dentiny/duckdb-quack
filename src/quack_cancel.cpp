@@ -66,10 +66,8 @@ static void QuackCancelScan(ClientContext &, TableFunctionInput &input, DataChun
 }
 
 TableFunction QuackCancelFunction::GetFunction() {
-	auto fun =
-	    TableFunction("quack_cancel", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackCancelScan, QuackCancelBind);
-	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
-	return fun;
+	return TableFunction("quack_cancel", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackCancelScan,
+	                     QuackCancelBind);
 }
 
 } // namespace duckdb

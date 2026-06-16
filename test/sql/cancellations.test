@@ -2,21 +2,14 @@
 # description: test quack_cancel interrupts an active query
 # group: [sql]
 
-require quack
-
-require httpfs
-
-set ignore_error_messages __none__
-
-statement ok
-CALL quack_serve('quack:localhost', token='asdf');
+include test/template/quack_setup.test_template
 
 concurrentloop threadid 0 2
 
 # slow query
 onlyif threadid=0
 statement ok
-ATTACH 'quack:localhost' AS remote (TYPE quack, TOKEN 'asdf');
+ATTACH {server} AS remote (TOKEN 'asdf');
 
 # sleep for a while
 onlyif threadid=0
@@ -27,20 +20,26 @@ Interrupt
 
 onlyif threadid=1
 statement ok
-ATTACH 'quack:localhost' AS remote2 (TYPE quack, TOKEN 'asdf');
+ATTACH {server} AS remote2 (TOKEN 'asdf');
 
 # wait for the query to be active, sleep a bit first, just to be sure
 onlyif threadid=1
 statement ok
 SELECT sleep_ms(100);
 
-# get the connection id from the currently active connection
 onlyif threadid=1
 statement ok
 SET VARIABLE conn_id = (
-  SELECT connection_id FROM quack_active_connections()
-  WHERE state = 'active' LIMIT 1
+  SELECT connection_id
+  FROM quack_query_by_name('remote2',
+    'SELECT connection_id FROM quack_active_connections()
+     WHERE state = ''active'' AND query = ''SELECT sleep_ms(5000)''
+     LIMIT 1')
 );
+
+onlyif threadid=1
+statement ok
+SELECT sleep_ms(100);
 
 onlyif threadid=1
 statement ok
@@ -48,10 +47,9 @@ FROM quack_cancel('remote2', getvariable('conn_id'));
 
 endloop
 
-query I
+query I quack_db:quack_server_con
 SELECT count(state) FROM quack_active_connections() where state = 'cancelled';
 ----
 1
 
-statement ok
-CALL quack_stop('quack:localhost');
+include test/template/quack_teardown.test_template

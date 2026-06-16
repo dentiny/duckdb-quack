@@ -441,8 +441,10 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 	case MessageType::CANCEL_REQUEST: {
 		auto &cancel_request_message = received_message.Cast<CancelRequestMessage>();
 		auto &connection = *connection_p;
-		// TODO; we should check the query id in the future
-		// to not cancel a newer query running on this connection
+		if (connection.query_uuid != cancel_request_message.query_uuid) {
+			return make_uniq<ErrorResponse>("Attempted to cancel a different query with id '%d' instead of '%d'",
+			                                cancel_request_message.query_uuid, connection.query_uuid);
+		}
 		connection.duckdb_connection->Interrupt();
 		connection.query_state = QuackQueryState::CANCELLED;
 		connection.duckdb_query_result.reset();
