@@ -244,7 +244,7 @@ bool ServerSupportsMessage(MessageType type) {
 	case MessageType::CONNECTION_REQUEST:
 	case MessageType::PREPARE_REQUEST:
 	case MessageType::FETCH_REQUEST:
-	case MessageType::QUACK_SEND_DATA:
+	case MessageType::QUACK_SEND_DATA_REQUEST:
 	case MessageType::DISCONNECT_MESSAGE:
 	case MessageType::CANCEL_REQUEST:
 	case MessageType::QUACK_FINALIZE:
@@ -475,8 +475,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		return make_uniq<FetchResponseMessage>(std::move(results), optional_idx(assigned_batch_index));
 	}
 
-	case MessageType::QUACK_SEND_DATA: {
-		auto &send_data_message = received_message.Cast<QuackSendDataMessage>();
+	case MessageType::QUACK_SEND_DATA_REQUEST: {
+		auto &send_data_message = received_message.Cast<QuackSendDataRequestMessage>();
 		auto &connection = *connection_p;
 
 		// we never execute this query, but throw it at the authorization function so it can check if this user gets to
@@ -535,7 +535,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			auto error = FinalizeInsertStream(connection);
 			return make_uniq<ErrorResponse>(error);
 		}
-		return make_uniq<SuccessResponse>();
+		// Placeholder budget (unset = unbounded) — future server-side flow-control hint.
+		return make_uniq<QuackSendDataResponseMessage>();
 	}
 	case MessageType::QUACK_FINALIZE: {
 		auto &finalize_message = received_message.Cast<QuackFinalizeMessage>();

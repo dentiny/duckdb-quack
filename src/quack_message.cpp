@@ -42,8 +42,11 @@ MessageType EnumUtil::FromString<MessageType>(const char *value) {
 	if (StringUtil::Equals(value, "FETCH_RESPONSE")) {
 		return MessageType::FETCH_RESPONSE;
 	}
-	if (StringUtil::Equals(value, "QUACK_SEND_DATA")) {
-		return MessageType::QUACK_SEND_DATA;
+	if (StringUtil::Equals(value, "QUACK_SEND_DATA_REQUEST")) {
+		return MessageType::QUACK_SEND_DATA_REQUEST;
+	}
+	if (StringUtil::Equals(value, "QUACK_SEND_DATA_RESPONSE")) {
+		return MessageType::QUACK_SEND_DATA_RESPONSE;
 	}
 	if (StringUtil::Equals(value, "SUCCESS_RESPONSE")) {
 		return MessageType::SUCCESS_RESPONSE;
@@ -79,8 +82,10 @@ const char *EnumUtil::ToChars<MessageType>(MessageType value) {
 		return "FETCH_REQUEST";
 	case MessageType::FETCH_RESPONSE:
 		return "FETCH_RESPONSE";
-	case MessageType::QUACK_SEND_DATA:
-		return "QUACK_SEND_DATA";
+	case MessageType::QUACK_SEND_DATA_REQUEST:
+		return "QUACK_SEND_DATA_REQUEST";
+	case MessageType::QUACK_SEND_DATA_RESPONSE:
+		return "QUACK_SEND_DATA_RESPONSE";
 	case MessageType::SUCCESS_RESPONSE:
 		return "SUCCESS_RESPONSE";
 	case MessageType::DISCONNECT_MESSAGE:
@@ -129,8 +134,10 @@ unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer, M
 		return FetchRequestMessage::Deserialize(deserializer);
 	case MessageType::FETCH_RESPONSE:
 		return FetchResponseMessage::Deserialize(deserializer);
-	case MessageType::QUACK_SEND_DATA:
-		return QuackSendDataMessage::Deserialize(deserializer);
+	case MessageType::QUACK_SEND_DATA_REQUEST:
+		return QuackSendDataRequestMessage::Deserialize(deserializer);
+	case MessageType::QUACK_SEND_DATA_RESPONSE:
+		return QuackSendDataResponseMessage::Deserialize(deserializer);
 	case MessageType::SUCCESS_RESPONSE:
 		return SuccessResponse::Deserialize(deserializer);
 	case MessageType::DISCONNECT_MESSAGE:

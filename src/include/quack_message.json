@@ -96,7 +96,7 @@
     "constructor": ["result_types", "result_names",  "results", "needs_more_fetch", "result_uuid"]
   },
   {
-    "class": "QuackSendDataMessage",
+    "class": "QuackSendDataRequestMessage",
     "members": [
       {
         "id": 1,
@@ -117,6 +117,16 @@
         "id": 4,
         "name": "query_uuid",
         "type": "hugeint_t"
+      }
+    ]
+  },
+  {
+    "class": "QuackSendDataResponseMessage",
+    "members": [
+      {
+        "id": 1,
+        "name": "accept_budget",
+        "type": "optional_idx"
       }
     ]
   },
