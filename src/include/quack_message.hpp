@@ -15,10 +15,11 @@ enum class MessageType : uint8_t {
 	PREPARE_RESPONSE = 4,
 	FETCH_REQUEST = 7,
 	FETCH_RESPONSE = 8,
-	APPEND_REQUEST = 9,
+	QUACK_SEND_DATA = 9,
 	SUCCESS_RESPONSE = 10,
 	DISCONNECT_MESSAGE = 11,
 	CANCEL_REQUEST = 12,
+	QUACK_FINALIZE = 13,
 	ERROR_RESPONSE = 100
 };
 
@@ -303,18 +304,22 @@ private:
 	optional_idx batch_index;
 };
 
-class AppendRequestMessage : public QuackMessage {
+// Streams one DataChunk of insert data to the server, which routes it into the per-stream queue
+// feeding the scan_data_from_quack_client table function. The stream is identified by
+// (connection_id, query_uuid) — a per-insert-statement UUID the client mints, mirroring the read
+// path's PrepareRequest/FetchRequest. Wire type id 9 (formerly APPEND_REQUEST).
+class QuackSendDataMessage : public QuackMessage {
 public:
-	static constexpr MessageType TYPE = MessageType::APPEND_REQUEST;
+	static constexpr MessageType TYPE = MessageType::QUACK_SEND_DATA;
 
-	explicit AppendRequestMessage(string connection_id_p, string schema_name_p, string table_name_p,
-	                              unique_ptr<DataChunkWrapper> append_chunk_p)
+	explicit QuackSendDataMessage(string connection_id_p, string schema_name_p, string table_name_p,
+	                              unique_ptr<DataChunkWrapper> append_chunk_p, hugeint_t query_uuid_p)
 	    : QuackMessage(TYPE, std::move(connection_id_p)), schema_name(std::move(schema_name_p)),
-	      table_name(std::move(table_name_p)), append_chunk(std::move(append_chunk_p)) {
+	      table_name(std::move(table_name_p)), append_chunk(std::move(append_chunk_p)), query_uuid(query_uuid_p) {
 	}
 
 	void Serialize(Serializer &serializer) const override;
-	static unique_ptr<AppendRequestMessage> Deserialize(Deserializer &deserializer);
+	static unique_ptr<QuackSendDataMessage> Deserialize(Deserializer &deserializer);
 
 	DataChunk &AppendChunk() const {
 		return append_chunk->Chunk();
@@ -325,15 +330,44 @@ public:
 	const string &TableName() const {
 		return table_name;
 	}
+	hugeint_t QueryUUID() const {
+		return query_uuid;
+	}
 
 protected:
-	AppendRequestMessage() : QuackMessage(TYPE) {
+	QuackSendDataMessage() : QuackMessage(TYPE) {
 	}
 
 private:
 	string schema_name;
 	string table_name;
 	unique_ptr<DataChunkWrapper> append_chunk;
+	hugeint_t query_uuid;
+};
+
+// End-of-stream marker: finalize the streamed insert identified by (connection_id, query_uuid). The
+// server drains the source, completes the INSERT statement, and replies Success (or Error). Distinct
+// from a transaction COMMIT.
+class QuackFinalizeMessage : public QuackMessage {
+public:
+	static constexpr MessageType TYPE = MessageType::QUACK_FINALIZE;
+
+	explicit QuackFinalizeMessage(string connection_id_p, hugeint_t query_uuid_p)
+	    : QuackMessage(TYPE, std::move(connection_id_p)), query_uuid(query_uuid_p) {};
+
+	void Serialize(Serializer &serializer) const override;
+	static unique_ptr<QuackFinalizeMessage> Deserialize(Deserializer &deserializer);
+
+	hugeint_t QueryUUID() const {
+		return query_uuid;
+	}
+
+protected:
+	QuackFinalizeMessage() : QuackMessage(TYPE) {
+	}
+
+private:
+	hugeint_t query_uuid;
 };
 
 class DisconnectMessage : public QuackMessage {

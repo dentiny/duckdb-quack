@@ -96,7 +96,7 @@
     "constructor": ["result_types", "result_names",  "results", "needs_more_fetch", "result_uuid"]
   },
   {
-    "class": "AppendRequestMessage",
+    "class": "QuackSendDataMessage",
     "members": [
       {
         "id": 1,
@@ -112,6 +112,21 @@
         "id": 3,
         "name": "append_chunk",
         "type": "unique_ptr<DataChunkWrapper>"
+      },
+      {
+        "id": 4,
+        "name": "query_uuid",
+        "type": "hugeint_t"
+      }
+    ]
+  },
+  {
+    "class": "QuackFinalizeMessage",
+    "members": [
+      {
+        "id": 1,
+        "name": "query_uuid",
+        "type": "hugeint_t"
       }
     ]
   },
