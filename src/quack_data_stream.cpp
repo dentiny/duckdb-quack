@@ -84,8 +84,8 @@ QuackStreamRegistry &QuackStreamRegistry::Get() {
 	return instance;
 }
 
-string QuackStreamRegistry::MakeId(const string &connection_id, optional_idx client_query_id) {
-	return connection_id + ":" + (client_query_id.IsValid() ? to_string(client_query_id.GetIndex()) : string("_"));
+string QuackStreamRegistry::MakeId(const string &connection_id, hugeint_t query_uuid) {
+	return connection_id + ":" + UUID::ToString(query_uuid);
 }
 
 shared_ptr<QuackDataStream> QuackStreamRegistry::Create(const string &id, vector<LogicalType> types) {

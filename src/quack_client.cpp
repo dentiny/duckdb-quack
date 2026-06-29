@@ -110,8 +110,11 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 		case MessageType::FETCH_REQUEST:
 			connection_id = request_message->Cast<FetchRequestMessage>().ConnectionId();
 			break;
-		case MessageType::APPEND_REQUEST:
-			connection_id = request_message->Cast<AppendRequestMessage>().ConnectionId();
+		case MessageType::QUACK_SEND_DATA:
+			connection_id = request_message->Cast<QuackSendDataMessage>().ConnectionId();
+			break;
+		case MessageType::QUACK_FINALIZE:
+			connection_id = request_message->Cast<QuackFinalizeMessage>().ConnectionId();
 			break;
 		default:
 			break;
