@@ -55,13 +55,6 @@ public:
 	//! stream is finished/errored, or a short timeout elapses (so the caller can re-check cancellation).
 	void WaitForData();
 
-	void SetInsertCount(idx_t count) {
-		insert_count = count;
-	}
-	idx_t InsertCount() const {
-		return insert_count;
-	}
-
 private:
 	annotated_mutex lock;
 	std::condition_variable cv_nonempty;
@@ -72,7 +65,6 @@ private:
 	bool finished DUCKDB_GUARDED_BY(lock) = false;
 	bool errored DUCKDB_GUARDED_BY(lock) = false;
 	ErrorData error DUCKDB_GUARDED_BY(lock);
-	idx_t insert_count = 0;
 };
 
 //! Process-global registry mapping a stream id to its QuackDataStream, letting the

@@ -56,10 +56,8 @@ SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 	auto &global_state = input.global_state.Cast<QuackInsertGlobalState>();
 	auto &tbl = global_state.table;
 	auto &quack_catalog = tbl.catalog.Cast<QuackCatalog>();
-	auto append_chunk = make_uniq<DataChunk>();
-	append_chunk->Initialize(context.client, chunk.GetTypes());
-	append_chunk->Reference(chunk);
-	auto chunk_wrapper = make_uniq<DataChunkWrapper>(*append_chunk);
+	// Wrap (references chunk, no copy); serialized synchronously in Request below while `chunk` is alive.
+	auto chunk_wrapper = make_uniq<DataChunkWrapper>(chunk);
 	auto append_message = make_uniq<SendDataRequestMessage>(
 	    quack_catalog.GetConnectionId(), tbl.schema.name.GetIdentifierName(), tbl.name.GetIdentifierName(),
 	    std::move(chunk_wrapper), global_state.query_uuid);
@@ -71,6 +69,7 @@ SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 	// ErrorResponse, which Request<>() rethrows.
 	client.Request<SendDataResponseMessage>(context.client, std::move(append_message));
 
+	// Client-side optimistic count (rows sent); exact because any server failure throws above before reporting.
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;
 }
