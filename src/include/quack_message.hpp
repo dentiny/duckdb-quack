@@ -305,23 +305,34 @@ private:
 	optional_idx batch_index;
 };
 
-// Streams one DataChunk of insert data to the server, keyed by (connection_id, query_uuid).
-// Answered by SendDataResponseMessage (or ErrorResponse on failure).
+// Streams one or more DataChunks of insert data to the server, keyed by (connection_id, query_uuid).
+// batch_index + sequence_index + is_last_in_batch are set for ordered inserts; invalid batch_index
+// means unordered (arrive and insert in any order). Answered by SendDataResponseMessage or ErrorResponse.
 class SendDataRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::SEND_DATA_REQUEST;
 
 	explicit SendDataRequestMessage(string connection_id_p, string schema_name_p, string table_name_p,
-	                                unique_ptr<DataChunkWrapper> append_chunk_p, hugeint_t query_uuid_p)
+	                                vector<unique_ptr<DataChunkWrapper>> chunks_p, hugeint_t query_uuid_p)
 	    : QuackMessage(TYPE, std::move(connection_id_p)), schema_name(std::move(schema_name_p)),
-	      table_name(std::move(table_name_p)), append_chunk(std::move(append_chunk_p)), query_uuid(query_uuid_p) {
+	      table_name(std::move(table_name_p)), chunks(std::move(chunks_p)), query_uuid(query_uuid_p) {
 	}
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<SendDataRequestMessage> Deserialize(Deserializer &deserializer);
 
-	DataChunk &AppendChunk() const {
-		return append_chunk->Chunk();
+	void SetOrdering(optional_idx batch_index_p, idx_t sequence_index_p, bool is_last_in_batch_p) {
+		batch_index = batch_index_p;
+		sequence_index = sequence_index_p;
+		is_last_in_batch = is_last_in_batch_p;
+	}
+
+	void SetBatchWatermark(optional_idx watermark) {
+		batch_watermark = watermark;
+	}
+
+	vector<unique_ptr<DataChunkWrapper>> &Chunks() {
+		return chunks;
 	}
 	const string &SchemaName() const {
 		return schema_name;
@@ -332,7 +343,18 @@ public:
 	hugeint_t QueryUUID() const {
 		return query_uuid;
 	}
-
+	optional_idx BatchIndex() const {
+		return batch_index;
+	}
+	idx_t SequenceIndex() const {
+		return sequence_index;
+	}
+	bool IsLastInBatch() const {
+		return is_last_in_batch;
+	}
+	optional_idx BatchWatermark() const {
+		return batch_watermark;
+	}
 protected:
 	SendDataRequestMessage() : QuackMessage(TYPE) {
 	}
@@ -340,8 +362,14 @@ protected:
 private:
 	string schema_name;
 	string table_name;
-	unique_ptr<DataChunkWrapper> append_chunk;
+	vector<unique_ptr<DataChunkWrapper>> chunks;
 	hugeint_t query_uuid;
+	optional_idx batch_index;
+	idx_t sequence_index = 0;
+	bool is_last_in_batch = false;
+	//! Minimum batch index that will ever appear in this stream; piggybacked on every ordered message so
+	//! the server can initialise its delivery cursor and start draining as soon as batches are complete.
+	optional_idx batch_watermark;
 };
 
 // Success reply to a SendDataRequestMessage. `accept_budget` is a placeholder for a future flow-control
@@ -377,8 +405,14 @@ public:
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<FinalizeMessage> Deserialize(Deserializer &deserializer);
 
+	void SetMinBatchWatermark(optional_idx watermark) {
+		min_batch_watermark = watermark;
+	}
 	hugeint_t QueryUUID() const {
 		return query_uuid;
+	}
+	optional_idx MinBatchWatermark() const {
+		return min_batch_watermark;
 	}
 
 protected:
@@ -387,6 +421,9 @@ protected:
 
 private:
 	hugeint_t query_uuid;
+	//! Minimum batch index in the stream; set when ordered mode was used. Server initialises its delivery
+	//! cursor from this value after all data has been received.
+	optional_idx min_batch_watermark;
 };
 
 class DisconnectMessage : public QuackMessage {
