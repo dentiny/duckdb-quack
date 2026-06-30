@@ -31,6 +31,15 @@ public:
 		return unique_ptr_cast<QuackMessage, TARGET>(std::move(response_message));
 	}
 
+	//! POST already-serialized request bytes and return the raw response body, throwing on transport failure.
+	//! Lets an async sender serialize on a producer thread and perform the blocking POST from the ASYNC pool;
+	//! pass context=nullptr when called off the execution thread (parameters fall back to the database).
+	virtual string PostRaw(optional_ptr<ClientContext> context, const_data_ptr_t data, idx_t size) = 0;
+
+	//! Emit a Quack request log entry. Safe to call from an async pool thread (uses db-level logger).
+	void LogRequest(MessageType request_type, const string &connection_id, optional_idx client_query_id,
+	                const string &query, int64_t duration_ms, MessageType response_type, const string &error);
+
 	static unique_ptr<QuackClient> GetClient(DatabaseInstance &db, const QuackUri &uri);
 	static unique_ptr<QuackClient> GetClient(ClientContext &context, const QuackUri &uri);
 
@@ -91,9 +100,13 @@ public:
 	HttpsQuackClient(DatabaseInstance &db, const QuackUri &uri_p);
 	~HttpsQuackClient() override;
 
+	string PostRaw(optional_ptr<ClientContext> context, const_data_ptr_t data, idx_t size) override;
+
 private:
 	unique_ptr<QuackMessage> RequestInternal(optional_ptr<ClientContext> context,
 	                                         unique_ptr<QuackMessage> request_message) override;
+	//! POST bytes assuming request_mutex is already held.
+	string PostRawLocked(const_data_ptr_t data, idx_t size);
 
 private:
 	unique_ptr<HTTPParams> http_params;
