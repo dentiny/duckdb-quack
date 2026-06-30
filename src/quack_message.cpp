@@ -42,11 +42,11 @@ MessageType EnumUtil::FromString<MessageType>(const char *value) {
 	if (StringUtil::Equals(value, "FETCH_RESPONSE")) {
 		return MessageType::FETCH_RESPONSE;
 	}
-	if (StringUtil::Equals(value, "QUACK_SEND_DATA_REQUEST")) {
-		return MessageType::QUACK_SEND_DATA_REQUEST;
+	if (StringUtil::Equals(value, "SEND_DATA_REQUEST")) {
+		return MessageType::SEND_DATA_REQUEST;
 	}
-	if (StringUtil::Equals(value, "QUACK_SEND_DATA_RESPONSE")) {
-		return MessageType::QUACK_SEND_DATA_RESPONSE;
+	if (StringUtil::Equals(value, "SEND_DATA_RESPONSE")) {
+		return MessageType::SEND_DATA_RESPONSE;
 	}
 	if (StringUtil::Equals(value, "SUCCESS_RESPONSE")) {
 		return MessageType::SUCCESS_RESPONSE;
@@ -57,8 +57,8 @@ MessageType EnumUtil::FromString<MessageType>(const char *value) {
 	if (StringUtil::Equals(value, "CANCEL_REQUEST")) {
 		return MessageType::CANCEL_REQUEST;
 	}
-	if (StringUtil::Equals(value, "QUACK_FINALIZE")) {
-		return MessageType::QUACK_FINALIZE;
+	if (StringUtil::Equals(value, "FINALIZE")) {
+		return MessageType::FINALIZE;
 	}
 	if (StringUtil::Equals(value, "ERROR_RESPONSE")) {
 		return MessageType::ERROR_RESPONSE;
@@ -82,18 +82,18 @@ const char *EnumUtil::ToChars<MessageType>(MessageType value) {
 		return "FETCH_REQUEST";
 	case MessageType::FETCH_RESPONSE:
 		return "FETCH_RESPONSE";
-	case MessageType::QUACK_SEND_DATA_REQUEST:
-		return "QUACK_SEND_DATA_REQUEST";
-	case MessageType::QUACK_SEND_DATA_RESPONSE:
-		return "QUACK_SEND_DATA_RESPONSE";
+	case MessageType::SEND_DATA_REQUEST:
+		return "SEND_DATA_REQUEST";
+	case MessageType::SEND_DATA_RESPONSE:
+		return "SEND_DATA_RESPONSE";
 	case MessageType::SUCCESS_RESPONSE:
 		return "SUCCESS_RESPONSE";
 	case MessageType::DISCONNECT_MESSAGE:
 		return "DISCONNECT_MESSAGE";
 	case MessageType::CANCEL_REQUEST:
 		return "CANCEL_REQUEST";
-	case MessageType::QUACK_FINALIZE:
-		return "QUACK_FINALIZE";
+	case MessageType::FINALIZE:
+		return "FINALIZE";
 	case MessageType::ERROR_RESPONSE:
 		return "ERROR_RESPONSE";
 
@@ -134,18 +134,18 @@ unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer, M
 		return FetchRequestMessage::Deserialize(deserializer);
 	case MessageType::FETCH_RESPONSE:
 		return FetchResponseMessage::Deserialize(deserializer);
-	case MessageType::QUACK_SEND_DATA_REQUEST:
-		return QuackSendDataRequestMessage::Deserialize(deserializer);
-	case MessageType::QUACK_SEND_DATA_RESPONSE:
-		return QuackSendDataResponseMessage::Deserialize(deserializer);
+	case MessageType::SEND_DATA_REQUEST:
+		return SendDataRequestMessage::Deserialize(deserializer);
+	case MessageType::SEND_DATA_RESPONSE:
+		return SendDataResponseMessage::Deserialize(deserializer);
 	case MessageType::SUCCESS_RESPONSE:
 		return SuccessResponse::Deserialize(deserializer);
 	case MessageType::DISCONNECT_MESSAGE:
 		return DisconnectMessage::Deserialize(deserializer);
 	case MessageType::CANCEL_REQUEST:
 		return CancelRequestMessage::Deserialize(deserializer);
-	case MessageType::QUACK_FINALIZE:
-		return QuackFinalizeMessage::Deserialize(deserializer);
+	case MessageType::FINALIZE:
+		return FinalizeMessage::Deserialize(deserializer);
 	case MessageType::ERROR_RESPONSE:
 		return ErrorResponse::Deserialize(deserializer);
 	default:

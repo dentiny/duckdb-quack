@@ -9,15 +9,15 @@
 
 namespace duckdb {
 
-void QuackSendDataRequestMessage::Serialize(Serializer &serializer) const {
+void SendDataRequestMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<string>(1, "schema_name", schema_name);
 	serializer.WritePropertyWithDefault<string>(2, "table_name", table_name);
 	serializer.WritePropertyWithDefault<unique_ptr<DataChunkWrapper>>(3, "append_chunk", append_chunk);
 	serializer.WriteProperty<hugeint_t>(4, "query_uuid", query_uuid);
 }
 
-unique_ptr<QuackSendDataRequestMessage> QuackSendDataRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto result = duckdb::unique_ptr<QuackSendDataRequestMessage>(new QuackSendDataRequestMessage());
+unique_ptr<SendDataRequestMessage> SendDataRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<SendDataRequestMessage>(new SendDataRequestMessage());
 	deserializer.ReadPropertyWithDefault<string>(1, "schema_name", result->schema_name);
 	deserializer.ReadPropertyWithDefault<string>(2, "table_name", result->table_name);
 	deserializer.ReadPropertyWithDefault<unique_ptr<DataChunkWrapper>>(3, "append_chunk", result->append_chunk);
@@ -25,22 +25,22 @@ unique_ptr<QuackSendDataRequestMessage> QuackSendDataRequestMessage::Deserialize
 	return result;
 }
 
-void QuackSendDataResponseMessage::Serialize(Serializer &serializer) const {
+void SendDataResponseMessage::Serialize(Serializer &serializer) const {
 	serializer.WriteProperty<optional_idx>(1, "accept_budget", accept_budget);
 }
 
-unique_ptr<QuackSendDataResponseMessage> QuackSendDataResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto result = duckdb::unique_ptr<QuackSendDataResponseMessage>(new QuackSendDataResponseMessage());
+unique_ptr<SendDataResponseMessage> SendDataResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<SendDataResponseMessage>(new SendDataResponseMessage());
 	deserializer.ReadProperty<optional_idx>(1, "accept_budget", result->accept_budget);
 	return result;
 }
 
-void QuackFinalizeMessage::Serialize(Serializer &serializer) const {
+void FinalizeMessage::Serialize(Serializer &serializer) const {
 	serializer.WriteProperty<hugeint_t>(1, "query_uuid", query_uuid);
 }
 
-unique_ptr<QuackFinalizeMessage> QuackFinalizeMessage::Deserialize(Deserializer &deserializer) {
-	auto result = duckdb::unique_ptr<QuackFinalizeMessage>(new QuackFinalizeMessage());
+unique_ptr<FinalizeMessage> FinalizeMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<FinalizeMessage>(new FinalizeMessage());
 	deserializer.ReadProperty<hugeint_t>(1, "query_uuid", result->query_uuid);
 	return result;
 }

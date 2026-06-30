@@ -32,9 +32,8 @@ public:
 
 	QuackTableCatalogEntry &table;
 	idx_t insert_count;
-	//! Per-statement id for the server-side insert stream (mirrors the read path's query_uuid).
-	//! Sent on every QUACK_SEND_DATA and the QUACK_FINALIZE so the server keys the stream by
-	//! (connection_id, query_uuid).
+	//! Per-statement id for the server-side insert stream. Sent on every SEND_DATA and the FINALIZE so
+	//! the server keys the stream by (connection_id, query_uuid).
 	hugeint_t query_uuid;
 };
 
@@ -61,7 +60,7 @@ SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 	append_chunk->Initialize(context.client, chunk.GetTypes());
 	append_chunk->Reference(chunk);
 	auto chunk_wrapper = make_uniq<DataChunkWrapper>(*append_chunk);
-	auto append_message = make_uniq<QuackSendDataRequestMessage>(
+	auto append_message = make_uniq<SendDataRequestMessage>(
 	    quack_catalog.GetConnectionId(), tbl.schema.name.GetIdentifierName(), tbl.name.GetIdentifierName(),
 	    std::move(chunk_wrapper), global_state.query_uuid);
 
@@ -70,7 +69,7 @@ SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 	auto &client = client_wrapper->GetClient();
 	// The response carries a placeholder accept-budget for future flow control; errors arrive as an
 	// ErrorResponse, which Request<>() rethrows.
-	client.Request<QuackSendDataResponseMessage>(context.client, std::move(append_message));
+	client.Request<SendDataResponseMessage>(context.client, std::move(append_message));
 
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;
@@ -90,7 +89,7 @@ SinkFinalizeType QuackInsert::Finalize(Pipeline &pipeline, Event &event, ClientC
 	// Signal end-of-stream so the server drains the source, completes the INSERT statement, and
 	// commits it. A server-side failure (e.g. a constraint violation) surfaces here as an error.
 	client.Request<SuccessResponse>(
-	    context, make_uniq<QuackFinalizeMessage>(quack_catalog.GetConnectionId(), global_state.query_uuid));
+	    context, make_uniq<FinalizeMessage>(quack_catalog.GetConnectionId(), global_state.query_uuid));
 	return SinkFinalizeType::READY;
 }
 

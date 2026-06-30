@@ -96,7 +96,7 @@
     "constructor": ["result_types", "result_names",  "results", "needs_more_fetch", "result_uuid"]
   },
   {
-    "class": "QuackSendDataRequestMessage",
+    "class": "SendDataRequestMessage",
     "members": [
       {
         "id": 1,
@@ -121,7 +121,7 @@
     ]
   },
   {
-    "class": "QuackSendDataResponseMessage",
+    "class": "SendDataResponseMessage",
     "members": [
       {
         "id": 1,
@@ -131,7 +131,7 @@
     ]
   },
   {
-    "class": "QuackFinalizeMessage",
+    "class": "FinalizeMessage",
     "members": [
       {
         "id": 1,

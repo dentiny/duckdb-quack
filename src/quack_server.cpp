@@ -244,10 +244,10 @@ bool ServerSupportsMessage(MessageType type) {
 	case MessageType::CONNECTION_REQUEST:
 	case MessageType::PREPARE_REQUEST:
 	case MessageType::FETCH_REQUEST:
-	case MessageType::QUACK_SEND_DATA_REQUEST:
+	case MessageType::SEND_DATA_REQUEST:
 	case MessageType::DISCONNECT_MESSAGE:
 	case MessageType::CANCEL_REQUEST:
-	case MessageType::QUACK_FINALIZE:
+	case MessageType::FINALIZE:
 		return true;
 	default:
 		return false;
@@ -475,8 +475,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		return make_uniq<FetchResponseMessage>(std::move(results), optional_idx(assigned_batch_index));
 	}
 
-	case MessageType::QUACK_SEND_DATA_REQUEST: {
-		auto &send_data_message = received_message.Cast<QuackSendDataRequestMessage>();
+	case MessageType::SEND_DATA_REQUEST: {
+		auto &send_data_message = received_message.Cast<SendDataRequestMessage>();
 		auto &connection = *connection_p;
 
 		// we never execute this query, but throw it at the authorization function so it can check if this user gets to
@@ -496,10 +496,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			}
 		}
 
-		// Lazily start the per-statement stream + its background INSERT on the first chunk. The INSERT
-		// runs `... SELECT * FROM scan_data_from_quack_client('<id>')`, engaging PhysicalBatchInsert.
-		// The create-once / lookup is done under the short-held lifecycle lock so concurrent producers
-		// (a future async client) can't double-create the stream or double-assign the thread.
+		// Lazily start the per-statement stream + background INSERT on the first chunk. Create-once /
+		// lookup runs under the short-held lifecycle lock so concurrent producers can't double-create.
 		auto stream_id = QuackStreamRegistry::MakeId(send_data_message.ConnectionId(), send_data_message.QueryUUID());
 		shared_ptr<QuackDataStream> stream;
 		DetachedInsertStream displaced; // a stale stream of a different id, finalized after we unlock
@@ -536,10 +534,10 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			return make_uniq<ErrorResponse>(error);
 		}
 		// Placeholder budget (unset = unbounded) — future server-side flow-control hint.
-		return make_uniq<QuackSendDataResponseMessage>();
+		return make_uniq<SendDataResponseMessage>();
 	}
-	case MessageType::QUACK_FINALIZE: {
-		auto &finalize_message = received_message.Cast<QuackFinalizeMessage>();
+	case MessageType::FINALIZE: {
+		auto &finalize_message = received_message.Cast<FinalizeMessage>();
 		auto &connection = *connection_p;
 		auto stream_id = QuackStreamRegistry::MakeId(finalize_message.ConnectionId(), finalize_message.QueryUUID());
 		{

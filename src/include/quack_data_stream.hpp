@@ -19,10 +19,9 @@ struct QuackStreamChunk {
 	optional_idx batch_index;
 };
 
-//! A bounded, thread-safe queue feeding one server-side
-//! `INSERT ... SELECT * FROM scan_data_from_quack_client('<id>')` statement. The server's
-//! QUACK_SEND_DATA handlers push chunks (producer); the scan_data_from_quack_client table function
-//! pops them (consumer). The queue bound provides backpressure to the (synchronous) client.
+//! Bounded, thread-safe queue feeding one server-side
+//! `INSERT ... SELECT * FROM scan_data_from_quack_client('<id>')` statement. SEND_DATA handlers push
+//! chunks; the table function pops them. The bound provides backpressure to the (synchronous) client.
 class QuackDataStream {
 public:
 	enum class PopStatus : uint8_t {
@@ -54,8 +53,7 @@ public:
 	//! EMPTY / FINISHED / ERRORED. Never blocks.
 	PopStatus TryPop(QuackStreamChunk &out);
 	//! Consumer: bounded wait used by the async wait-task. Blocks until a chunk is available, the
-	//! stream is finished/errored, or a short timeout elapses (the timeout lets the caller re-check
-	//! query cancellation on the next scan re-entry).
+	//! stream is finished/errored, or a short timeout elapses (so the caller can re-check cancellation).
 	void WaitForData();
 
 	void SetInsertCount(idx_t count) {
@@ -78,10 +76,8 @@ private:
 	idx_t insert_count = 0;
 };
 
-//! Process-global registry mapping a stream id to its QuackDataStream, so the
-//! scan_data_from_quack_client table function (running inside the server's duckdb instance) can
-//! find the stream the server's request handlers created. The id is built from
-//! (connection_id, query_uuid) — see QuackStreamRegistry::MakeId.
+//! Process-global registry mapping a stream id to its QuackDataStream, letting the
+//! scan_data_from_quack_client table function find the stream the request handlers created.
 class QuackStreamRegistry {
 public:
 	static QuackStreamRegistry &Get();

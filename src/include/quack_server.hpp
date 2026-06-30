@@ -42,14 +42,8 @@ struct QuackConnection {
 	QuackQueryState query_state = QuackQueryState::IDLE;
 	timestamp_t query_started_at {0};
 
-	//! Active QUACK_SEND_DATA stream feeding a server-side INSERT (one per connection at a time).
-	//! The QUACK_SEND_DATA handlers push into `insert_stream`; `insert_thread` runs the INSERT
-	//! statement; QUACK_FINALIZE / disconnect drain and join it. `insert_stream_id` keys the stream
-	//! in the registry and is derived from (connection_id, query_uuid).
-	//! Guarded by `insert_lifecycle_lock` (NOT `lock`, which the INSERT thread holds for the whole
-	//! statement). The lock is held only briefly to create-once / look up / detach the stream, never
-	//! across a blocking Push or a thread join — this keeps concurrent same-connection producers (a
-	//! future async client) safe.
+	//! Per-connection SEND_DATA stream + background INSERT thread (keyed by `insert_stream_id`).
+	//! Guarded by `insert_lifecycle_lock`, held only briefly — never across a Push or a join.
 	std::mutex insert_lifecycle_lock;
 	shared_ptr<QuackDataStream> insert_stream;
 	std::thread insert_thread;
