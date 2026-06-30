@@ -7,8 +7,12 @@
 namespace duckdb {
 
 void QuackDataStream::Push(unique_ptr<DataChunk> chunk, optional_idx batch_index) {
-	std::unique_lock<std::mutex> guard(lock);
-	cv_nonfull.wait(guard, [&] { return queue.size() < capacity || finished || errored; });
+	annotated_unique_lock<annotated_mutex> guard(lock);
+	// Wait while the queue is full (unless the stream ended). Written as an explicit loop rather than a
+	// cv predicate lambda so the guarded fields are read under `guard`, where the analysis can see it.
+	while (queue.size() >= capacity && !finished && !errored) {
+		cv_nonfull.wait(guard);
+	}
 	if (finished || errored) {
 		// Consumer is gone or the statement failed - drop the chunk; the error is surfaced elsewhere.
 		return;
@@ -22,7 +26,7 @@ void QuackDataStream::Push(unique_ptr<DataChunk> chunk, optional_idx batch_index
 
 void QuackDataStream::Finish() {
 	{
-		std::lock_guard<std::mutex> guard(lock);
+		annotated_lock_guard<annotated_mutex> guard(lock);
 		finished = true;
 	}
 	cv_nonempty.notify_all();
@@ -31,7 +35,7 @@ void QuackDataStream::Finish() {
 
 void QuackDataStream::SetError(ErrorData error_p) {
 	{
-		std::lock_guard<std::mutex> guard(lock);
+		annotated_lock_guard<annotated_mutex> guard(lock);
 		if (!errored) {
 			errored = true;
 			error = std::move(error_p);
@@ -43,17 +47,17 @@ void QuackDataStream::SetError(ErrorData error_p) {
 }
 
 bool QuackDataStream::HasError() {
-	std::lock_guard<std::mutex> guard(lock);
+	annotated_lock_guard<annotated_mutex> guard(lock);
 	return errored;
 }
 
 ErrorData QuackDataStream::GetError() {
-	std::lock_guard<std::mutex> guard(lock);
+	annotated_lock_guard<annotated_mutex> guard(lock);
 	return error;
 }
 
 QuackDataStream::PopStatus QuackDataStream::TryPop(QuackStreamChunk &out) {
-	std::lock_guard<std::mutex> guard(lock);
+	annotated_lock_guard<annotated_mutex> guard(lock);
 	if (errored) {
 		return PopStatus::ERRORED;
 	}
@@ -70,12 +74,11 @@ QuackDataStream::PopStatus QuackDataStream::TryPop(QuackStreamChunk &out) {
 }
 
 void QuackDataStream::WaitForData() {
-	std::unique_lock<std::mutex> guard(lock);
+	annotated_unique_lock<annotated_mutex> guard(lock);
 	if (!queue.empty() || finished || errored) {
 		return;
 	}
-	// Bounded wait: woken by a producer Push / Finish / SetError, else times out so the scan can
-	// re-check query cancellation on its next re-entry.
+	// Bounded wait: woken by Push/Finish/SetError, else times out so the scan can re-check cancellation.
 	cv_nonempty.wait_for(guard, std::chrono::milliseconds(200));
 }
 
@@ -90,13 +93,13 @@ string QuackStreamRegistry::MakeId(const string &connection_id, hugeint_t query_
 
 shared_ptr<QuackDataStream> QuackStreamRegistry::Create(const string &id, vector<LogicalType> types) {
 	auto stream = make_shared_ptr<QuackDataStream>(std::move(types));
-	std::lock_guard<std::mutex> guard(lock);
+	annotated_lock_guard<annotated_mutex> guard(lock);
 	streams[id] = stream;
 	return stream;
 }
 
 shared_ptr<QuackDataStream> QuackStreamRegistry::Find(const string &id) {
-	std::lock_guard<std::mutex> guard(lock);
+	annotated_lock_guard<annotated_mutex> guard(lock);
 	auto entry = streams.find(id);
 	if (entry == streams.end()) {
 		return nullptr;
@@ -105,7 +108,7 @@ shared_ptr<QuackDataStream> QuackStreamRegistry::Find(const string &id) {
 }
 
 void QuackStreamRegistry::Erase(const string &id) {
-	std::lock_guard<std::mutex> guard(lock);
+	annotated_lock_guard<annotated_mutex> guard(lock);
 	streams.erase(id);
 }
 

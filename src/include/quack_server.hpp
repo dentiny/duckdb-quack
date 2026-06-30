@@ -43,11 +43,11 @@ struct QuackConnection {
 	timestamp_t query_started_at {0};
 
 	//! Per-connection SEND_DATA stream + background INSERT thread (keyed by `insert_stream_id`).
-	//! Guarded by `insert_lifecycle_lock`, held only briefly — never across a Push or a join.
-	std::mutex insert_lifecycle_lock;
-	shared_ptr<QuackDataStream> insert_stream;
-	std::thread insert_thread;
-	string insert_stream_id;
+	//! The lock is held only briefly — never across a Push or a join.
+	annotated_mutex insert_lifecycle_lock;
+	shared_ptr<QuackDataStream> insert_stream DUCKDB_GUARDED_BY(insert_lifecycle_lock);
+	std::thread insert_thread DUCKDB_GUARDED_BY(insert_lifecycle_lock);
+	string insert_stream_id DUCKDB_GUARDED_BY(insert_lifecycle_lock);
 };
 
 struct QuackConnectionSnapshot {

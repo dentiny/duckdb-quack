@@ -3,12 +3,12 @@
 #include "duckdb/common/types/data_chunk.hpp"
 #include "duckdb/common/types/uuid.hpp"
 #include "duckdb/common/error_data.hpp"
+#include "duckdb/common/mutex.hpp"
 #include "duckdb/common/optional_idx.hpp"
 #include "duckdb/common/unordered_map.hpp"
 
 #include <condition_variable>
 #include <deque>
-#include <mutex>
 
 namespace duckdb {
 
@@ -19,9 +19,8 @@ struct QuackStreamChunk {
 	optional_idx batch_index;
 };
 
-//! Bounded, thread-safe queue feeding one server-side
-//! `INSERT ... SELECT * FROM scan_data_from_quack_client('<id>')` statement. SEND_DATA handlers push
-//! chunks; the table function pops them. The bound provides backpressure to the (synchronous) client.
+//! Bounded, thread-safe queue feeding one server-side scan_data_from_quack_client INSERT. SEND_DATA
+//! handlers push chunks; the table function pops them; the bound backpressures the client.
 class QuackDataStream {
 public:
 	enum class PopStatus : uint8_t {
@@ -64,15 +63,15 @@ public:
 	}
 
 private:
-	std::mutex lock;
+	annotated_mutex lock;
 	std::condition_variable cv_nonempty;
 	std::condition_variable cv_nonfull;
-	std::deque<QuackStreamChunk> queue;
+	std::deque<QuackStreamChunk> queue DUCKDB_GUARDED_BY(lock);
 	vector<LogicalType> types;
 	idx_t capacity;
-	bool finished = false;
-	bool errored = false;
-	ErrorData error;
+	bool finished DUCKDB_GUARDED_BY(lock) = false;
+	bool errored DUCKDB_GUARDED_BY(lock) = false;
+	ErrorData error DUCKDB_GUARDED_BY(lock);
 	idx_t insert_count = 0;
 };
 
@@ -89,8 +88,8 @@ public:
 	void Erase(const string &id);
 
 private:
-	std::mutex lock;
-	unordered_map<string, shared_ptr<QuackDataStream>> streams;
+	annotated_mutex lock;
+	unordered_map<string, shared_ptr<QuackDataStream>> streams DUCKDB_GUARDED_BY(lock);
 };
 
 } // namespace duckdb

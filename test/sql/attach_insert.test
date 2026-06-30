@@ -109,6 +109,26 @@ endloop
 statement ok
 reset async_threads;
 
+# --- client-side source failure mid-stream: the client sends some chunks then errors and never sends
+# FINALIZE. The server must abort (roll back) the abandoned insert rather than hang holding the
+# connection lock, so a following statement on the same connection still works.
+statement ok
+create table rpc.local_fail(i bigint);
+
+statement error
+insert into rpc.local_fail
+select case when i >= 2048 then error('local source failed') else i end::bigint from range(4096) t(i);
+----
+local source failed
+
+statement ok
+insert into rpc.local_fail values (-1);
+
+query I
+select count(*) from rpc.local_fail;
+----
+1
+
 statement ok con2
 detach rpc;
 
