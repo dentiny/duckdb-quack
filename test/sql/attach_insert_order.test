@@ -1,0 +1,178 @@
+# name: test/sql/attach_insert_order.test
+# description: order-preserving rpc INSERT: PARALLEL_ORDERED (scan/parquet), SERIAL_ORDERED (range), flush splitting, sparse-batch gaps, async sweep, CTAS, unordered fast path
+# group: [sql]
+
+require parquet
+
+include test/template/quack_setup.test_template
+
+statement ok
+attach {server} as rpc (token 'asdf')
+
+# Local ordered source. Parallel table scan supplies executor batch indices (PARALLEL_ORDERED path).
+statement ok
+create table src as select * from range(300000) t(i);
+
+statement ok
+SET threads=4;
+
+# --- PARALLEL_ORDERED: parallel table-scan source must land in source order despite concurrent producers.
+statement ok
+create table rpc.t_scan(i bigint);
+
+statement ok
+insert into rpc.t_scan select i from src;
+
+query III
+select count(*), min(i), max(i) from rpc.t_scan;
+----
+300000	0	299999
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_scan) where i != rn;
+----
+0
+
+# First stored row must be 0.
+query I
+select i from (select i, row_number() over () as rn from rpc.t_scan) where rn = 1;
+----
+0
+
+# --- SERIAL_ORDERED: range() has no executor batch index; the single producer mints one batch per flush.
+# Upload still runs async; order must be exact.
+statement ok
+create table rpc.t_range(i bigint);
+
+statement ok
+insert into rpc.t_range select * from range(300000) t(i);
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_range) where i != rn;
+----
+0
+
+# --- Parquet multi-row-group source (PARALLEL_ORDERED via parallel parquet scan).
+statement ok
+copy (select * from range(300000) t(i)) to '{TEST_DIR}/ord.parquet' (row_group_size 50000);
+
+statement ok
+create table rpc.t_parq(i bigint);
+
+statement ok
+insert into rpc.t_parq select i from read_parquet('{TEST_DIR}/ord.parquet');
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_parq) where i != rn;
+----
+0
+
+# --- Flush splitting: quack_send_data_flush_rows controls when a SEND_DATA_REQUEST is dispatched.
+# Setting it to 2048 means each row group is split into many messages; order must still be exact
+# and the client must emit far more SEND_DATA_REQUEST messages than there are row groups.
+statement ok
+CALL enable_logging(['Quack'], storage='memory');
+
+statement ok
+SET quack_send_data_flush_rows=2048;
+
+statement ok
+create table rpc.t_split(i bigint);
+
+statement ok
+insert into rpc.t_split select i from src;
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_split) where i != rn;
+----
+0
+
+# server != '' selects only client-side outgoing requests (not server-side echoes).
+# 300000 rows at flush_rows=2048 → ~147 messages, well above the 1 message without splitting.
+query I
+select count(*) > 50 from duckdb_logs_parsed('Quack')
+where message_type = 'SEND_DATA_REQUEST' and server is not null and server != '';
+----
+true
+
+statement ok
+reset quack_send_data_flush_rows;
+
+statement ok
+CALL disable_logging();
+
+# --- Sparse batch indices: a WHERE predicate can empty entire morsels, leaving gaps in the
+# executor's batch-index sequence. The server delivers complete batches in ascending index order,
+# skipping missing indices transparently. Row count and order must still be exact.
+statement ok
+create table rpc.t_filt(i bigint);
+
+statement ok
+insert into rpc.t_filt select i from src where i < 150000;
+
+query II
+select count(*), (select count(*) from src where i < 150000) from rpc.t_filt;
+----
+150000	150000
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_filt) where i != rn;
+----
+0
+
+# --- async_threads sweep: order holds for synchronous (=0), single-async (=1), and wide (=8) modes.
+foreach at 0 1 8
+
+statement ok
+SET async_threads={at};
+
+statement ok
+create table rpc.t_at(i bigint);
+
+statement ok
+insert into rpc.t_at select i from src;
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_at) where i != rn;
+----
+0
+
+statement ok
+drop table rpc.t_at;
+
+endloop
+
+statement ok
+reset async_threads;
+
+# --- CTAS preserves order.
+statement ok
+create table rpc.t_ctas as select i from src;
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_ctas) where i != rn;
+----
+0
+
+# --- UNORDERED fast path (preserve_insertion_order=false): all rows arrive, order not asserted.
+statement ok
+SET preserve_insertion_order=false;
+
+statement ok
+create table rpc.t_fast(i bigint);
+
+statement ok
+insert into rpc.t_fast select i from src;
+
+query II
+select count(*), sum(i) from rpc.t_fast;
+----
+300000	44999850000
+
+statement ok
+reset preserve_insertion_order;
+
+statement ok con2
+detach rpc;
+
+include test/template/quack_teardown.test_template
