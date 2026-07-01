@@ -144,6 +144,55 @@ where (rn < 4096 and i != rn) or (rn >= 4096 and i != rn + 195904);
 ----
 0
 
+# All row groups filtered out: no live batch, no stream, 0 rows — must not hang.
+statement ok
+create table rpc.t_alldead(i bigint);
+
+statement ok
+insert into rpc.t_alldead select i from read_parquet('{TEST_DIR}/gap.parquet') where i > 1000000;
+
+query I
+select count(*) from rpc.t_alldead;
+----
+0
+
+# Leading dead row group (0) + an internal one (2): live groups are 1 and 3.
+statement ok
+create table rpc.t_lead(i bigint);
+
+statement ok
+insert into rpc.t_lead
+select i from read_parquet('{TEST_DIR}/gap.parquet') where (i >= 50000 and i < 54096) or (i >= 150000 and i < 154096);
+
+query III
+select count(*), min(i), max(i) from rpc.t_lead;
+----
+8192	50000	154095
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_lead)
+where (rn < 4096 and i != rn + 50000) or (rn >= 4096 and i != rn + 145904);
+----
+0
+
+# Alternating live/dead row groups (0,2,4 live; 1,3,5 dead): multiple gaps -> multiple dead-range markers.
+statement ok
+create table rpc.t_alt(i bigint);
+
+statement ok
+insert into rpc.t_alt select i from read_parquet('{TEST_DIR}/gap.parquet') where (i % 100000) < 4096;
+
+query III
+select count(*), min(i), max(i) from rpc.t_alt;
+----
+12288	0	204095
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_alt)
+where (rn < 4096 and i != rn) or (rn >= 4096 and rn < 8192 and i != rn + 95904) or (rn >= 8192 and i != rn + 191808);
+----
+0
+
 # --- async_threads sweep: order holds for synchronous (=0), single-async (=1), and wide (=8) modes.
 foreach at 0 1 8
 

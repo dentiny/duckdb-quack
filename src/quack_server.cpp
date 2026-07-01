@@ -133,7 +133,6 @@ static string StreamIdForMessage(QuackMessage &msg) {
 	return string();
 }
 
-
 void QuackServer::ValidateToken(const string &token) {
 	if (token.size() < 4) {
 		throw InvalidInputException("Quack server token must be at least 4 characters long");
@@ -386,7 +385,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 	if (connection_p) {
 		// A message unrelated to the active insert stream means it was abandoned (client source failed, no
 		// FINALIZE) — abort it so it rolls back and releases the connection lock.
-		connection_p->insert.DetachIfUnrelated(StreamIdForMessage(received_message)).AbortAndJoin("insert stream abandoned");
+		connection_p->insert.DetachIfUnrelated(StreamIdForMessage(received_message))
+		    .AbortAndJoin("insert stream abandoned");
 	}
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
