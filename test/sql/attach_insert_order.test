@@ -1,5 +1,5 @@
 # name: test/sql/attach_insert_order.test
-# description: order-preserving rpc INSERT: PARALLEL_ORDERED (scan/parquet), SERIAL_ORDERED (range), flush splitting, sparse-batch gaps, async sweep, CTAS, unordered fast path
+# description: order-preserving rpc INSERT: PARALLEL_ORDERED (scan/parquet), SERIAL_ORDERED (range), flush splitting, trailing + internal batch-index gaps (dead-range markers), async sweep, CTAS, unordered fast path
 # group: [sql]
 
 require parquet
@@ -101,9 +101,8 @@ reset quack_send_data_flush_rows;
 statement ok
 CALL disable_logging();
 
-# --- Sparse batch indices: a WHERE predicate can empty entire morsels, leaving gaps in the
-# executor's batch-index sequence. The server delivers complete batches in ascending index order,
-# skipping missing indices transparently. Row count and order must still be exact.
+# --- Trailing gap: a WHERE predicate empties the high morsels, so the batch-index sequence runs
+# 0..M then stops. The server delivers 0..M and finishes; there is nothing above to skip.
 statement ok
 create table rpc.t_filt(i bigint);
 
@@ -117,6 +116,31 @@ select count(*), (select count(*) from src where i < 150000) from rpc.t_filt;
 
 query I
 select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_filt) where i != rn;
+----
+0
+
+# --- Internal gap: a predicate empties whole parquet row groups *between* live ones, leaving a gap in
+# the middle of the batch-index sequence. The client emits dead-range markers so the server skips the
+# dead indices and delivers the batches after the gap, in order, instead of stalling and dropping them.
+statement ok
+copy (select * from range(300000) t(i)) to '{TEST_DIR}/gap.parquet' (row_group_size 50000);
+
+statement ok
+create table rpc.t_gap(i bigint);
+
+statement ok
+insert into rpc.t_gap
+select i from read_parquet('{TEST_DIR}/gap.parquet') where i < 4096 or (i >= 200000 and i < 204096);
+
+query III
+select count(*), min(i), max(i) from rpc.t_gap;
+----
+8192	0	204095
+
+# rows land in source order across the gap: 0..4095 then 200000..204095
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_gap)
+where (rn < 4096 and i != rn) or (rn >= 4096 and i != rn + 195904);
 ----
 0
 
