@@ -44,6 +44,10 @@ public:
 	void PushOrdered(vector<unique_ptr<DataChunk>> chunks, idx_t batch, idx_t seq, bool is_last,
 	                 optional_idx watermark);
 
+	//! Record that batches [dead_start, dead_end) are dead (never produced), so the cursor can skip the gap.
+	//! Safe under reordering: recorded, then applied when the cursor reaches it.
+	void PushDeadRange(idx_t dead_start, idx_t dead_end);
+
 	//! Seed the delivery cursor from FINALIZE if no per-message watermark arrived first.
 	void SetWatermarkAndDrain(optional_idx watermark);
 
@@ -76,6 +80,9 @@ private:
 	std::map<idx_t, idx_t> last_seq_for_batch DUCKDB_GUARDED_BY(lock);
 	optional_idx next_expected_batch_ DUCKDB_GUARDED_BY(lock);
 	bool any_batch_delivered_ DUCKDB_GUARDED_BY(lock) = false;
+	//! Dead batch ranges [lo, hi) reported by the client for filtered/pruned gaps the sink never crossed.
+	//! The drain skips the cursor over a covering range instead of waiting for data that never comes.
+	std::map<idx_t, idx_t> dead_ranges DUCKDB_GUARDED_BY(lock);
 };
 
 //! Process-global registry: maps stream id → QuackDataStream so the scan function can find it.

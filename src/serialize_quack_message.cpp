@@ -158,6 +158,7 @@ void SendDataRequestMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<idx_t>(6, "sequence_index", sequence_index);
 	serializer.WritePropertyWithDefault<bool>(7, "is_last_in_batch", is_last_in_batch);
 	serializer.WritePropertyWithDefault<optional_idx>(8, "batch_watermark", batch_watermark, optional_idx());
+	serializer.WritePropertyWithDefault<optional_idx>(9, "dead_range_end", dead_range_end, optional_idx());
 }
 
 unique_ptr<SendDataRequestMessage> SendDataRequestMessage::Deserialize(Deserializer &deserializer) {
@@ -170,6 +171,8 @@ unique_ptr<SendDataRequestMessage> SendDataRequestMessage::Deserialize(Deseriali
 	deserializer.ReadPropertyWithDefault<idx_t>(6, "sequence_index", result->sequence_index);
 	deserializer.ReadPropertyWithDefault<bool>(7, "is_last_in_batch", result->is_last_in_batch);
 	deserializer.ReadPropertyWithExplicitDefault<optional_idx>(8, "batch_watermark", result->batch_watermark,
+	                                                           optional_idx());
+	deserializer.ReadPropertyWithExplicitDefault<optional_idx>(9, "dead_range_end", result->dead_range_end,
 	                                                           optional_idx());
 	return result;
 }

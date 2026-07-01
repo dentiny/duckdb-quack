@@ -143,6 +143,12 @@
         "name": "batch_watermark",
         "type": "optional_idx",
         "default": "optional_idx()"
+      },
+      {
+        "id": 9,
+        "name": "dead_range_end",
+        "type": "optional_idx",
+        "default": "optional_idx()"
       }
     ]
   },

@@ -540,7 +540,33 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		auto stream_id = QuackStreamRegistry::MakeId(send_data_message.ConnectionId(), send_data_message.QueryUUID());
 		bool ordered = send_data_message.BatchIndex().IsValid();
 		auto &incoming_chunks = send_data_message.Chunks();
+
+		// Dead-range marker: no chunks, tells the server batches [lo, hi) are dead so the cursor can skip them.
+		// A marker can overtake the first data message, so buffer it on the connection until the stream exists.
+		if (send_data_message.IsDeadRange()) {
+			auto lo = send_data_message.BatchIndex().GetIndex();
+			auto hi = send_data_message.DeadRangeEnd().GetIndex();
+			shared_ptr<QuackDataStream> dead_stream;
+			{
+				annotated_lock_guard<annotated_mutex> guard(connection.insert_lifecycle_lock);
+				if (connection.insert_stream && connection.insert_stream_id == stream_id) {
+					dead_stream = connection.insert_stream;
+				} else {
+					if (connection.pending_dead_range_stream_id != stream_id) {
+						connection.pending_dead_range_stream_id = stream_id;
+						connection.pending_dead_ranges.clear();
+					}
+					connection.pending_dead_ranges.emplace_back(lo, hi);
+				}
+			}
+			if (dead_stream) {
+				dead_stream->PushDeadRange(lo, hi);
+			}
+			return make_uniq<SendDataResponseMessage>();
+		}
+
 		shared_ptr<QuackDataStream> stream;
+		vector<std::pair<idx_t, idx_t>> buffered_dead_ranges;
 		{
 			annotated_lock_guard<annotated_mutex> guard(connection.insert_lifecycle_lock);
 			if (connection.insert_stream) {
@@ -557,7 +583,17 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 				connection.insert_stream_id = stream_id;
 				connection.insert_thread = std::thread(RunInsertStatement, std::ref(connection), stream, stream_id,
 				                                       send_data_message.SchemaName(), send_data_message.TableName());
+				// Apply any dead-range markers that arrived before the stream existed.
+				if (connection.pending_dead_range_stream_id == stream_id) {
+					buffered_dead_ranges = std::move(connection.pending_dead_ranges);
+					connection.pending_dead_ranges.clear();
+					connection.pending_dead_range_stream_id.clear();
+				}
 			}
+		}
+
+		for (auto &r : buffered_dead_ranges) {
+			stream->PushDeadRange(r.first, r.second);
 		}
 
 		// Reference the chunks from the message. DataChunkWrapper.Deserialize uses DataChunk::Reference()

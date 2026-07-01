@@ -48,6 +48,10 @@ struct QuackConnection {
 	shared_ptr<QuackDataStream> insert_stream DUCKDB_GUARDED_BY(insert_lifecycle_lock);
 	std::thread insert_thread DUCKDB_GUARDED_BY(insert_lifecycle_lock);
 	string insert_stream_id DUCKDB_GUARDED_BY(insert_lifecycle_lock);
+	//! Dead-range markers that arrived (via async reordering) before the stream-creating data message.
+	//! Applied to the stream once it is created. Keyed by `pending_dead_range_stream_id`.
+	string pending_dead_range_stream_id DUCKDB_GUARDED_BY(insert_lifecycle_lock);
+	vector<std::pair<idx_t, idx_t>> pending_dead_ranges DUCKDB_GUARDED_BY(insert_lifecycle_lock);
 };
 
 struct QuackConnectionSnapshot {

@@ -44,6 +44,17 @@ void QuackDataStream::SetWatermarkAndDrain(optional_idx watermark) {
 	}
 }
 
+void QuackDataStream::PushDeadRange(idx_t dead_start, idx_t dead_end) {
+	annotated_lock_guard<annotated_mutex> guard(lock);
+	if (finished || errored) {
+		return;
+	}
+	if (dead_end > dead_start) {
+		dead_ranges[dead_start] = dead_end;
+	}
+	DrainOrderedBatches();
+}
+
 void QuackDataStream::DrainOrderedBatches() {
 	if (!next_expected_batch_.IsValid()) {
 		return;
@@ -52,35 +63,51 @@ void QuackDataStream::DrainOrderedBatches() {
 		idx_t expected = next_expected_batch_.GetIndex();
 
 		auto last_seq_it = last_seq_for_batch.find(expected);
-		if (last_seq_it == last_seq_for_batch.end()) {
-			break;
-		}
-		idx_t last_seq = last_seq_it->second;
+		if (last_seq_it != last_seq_for_batch.end()) {
+			idx_t last_seq = last_seq_it->second;
 
-		bool all_seqs_present = true;
-		for (idx_t seq = 0; seq <= last_seq; seq++) {
-			if (ordered_pending.find({expected, seq}) == ordered_pending.end()) {
-				all_seqs_present = false;
+			bool all_seqs_present = true;
+			for (idx_t seq = 0; seq <= last_seq; seq++) {
+				if (ordered_pending.find({expected, seq}) == ordered_pending.end()) {
+					all_seqs_present = false;
+					break;
+				}
+			}
+			if (!all_seqs_present) {
 				break;
 			}
-		}
-		if (!all_seqs_present) {
-			break;
+
+			vector<unique_ptr<DataChunk>> batch_chunks;
+			for (idx_t seq = 0; seq <= last_seq; seq++) {
+				auto it = ordered_pending.find({expected, seq});
+				for (auto &chunk : it->second) {
+					batch_chunks.push_back(std::move(chunk));
+				}
+				ordered_pending.erase(it);
+			}
+			last_seq_for_batch.erase(last_seq_it);
+			any_batch_delivered_ = true;
+			ready_batches_.push_back({expected, std::move(batch_chunks)});
+			next_expected_batch_ = optional_idx(expected + 1);
+			cv_nonempty.notify_all();
+			continue;
 		}
 
-		vector<unique_ptr<DataChunk>> batch_chunks;
-		for (idx_t seq = 0; seq <= last_seq; seq++) {
-			auto it = ordered_pending.find({expected, seq});
-			for (auto &chunk : it->second) {
-				batch_chunks.push_back(std::move(chunk));
+		// No data for `expected`. If it falls inside a client-reported dead range, skip the whole gap;
+		// otherwise it may still be in flight, so wait.
+		if (!dead_ranges.empty()) {
+			auto dr = dead_ranges.upper_bound(expected); // first range starting after `expected`
+			if (dr != dead_ranges.begin()) {
+				--dr; // range with lo <= expected
+				if (dr->second > expected) {
+					any_batch_delivered_ = true; // cursor is committed; it must never retreat
+					next_expected_batch_ = optional_idx(dr->second);
+					dead_ranges.erase(dr);
+					continue;
+				}
 			}
-			ordered_pending.erase(it);
 		}
-		last_seq_for_batch.erase(last_seq_it);
-		any_batch_delivered_ = true;
-		ready_batches_.push_back({expected, std::move(batch_chunks)});
-		next_expected_batch_ = optional_idx(expected + 1);
-		cv_nonempty.notify_all();
+		break;
 	}
 }
 

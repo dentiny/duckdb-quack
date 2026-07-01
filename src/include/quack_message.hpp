@@ -331,6 +331,19 @@ public:
 		batch_watermark = watermark;
 	}
 
+	//! Turn this into a dead-range marker: batches [batch_index, dead_range_end) produced no rows and will
+	//! never arrive. Carries no chunks; batch_index is the (low) range start so it stays near the cursor.
+	void SetDeadRange(idx_t dead_start, idx_t dead_end) {
+		batch_index = optional_idx(dead_start);
+		dead_range_end = optional_idx(dead_end);
+	}
+	bool IsDeadRange() const {
+		return dead_range_end.IsValid();
+	}
+	optional_idx DeadRangeEnd() const {
+		return dead_range_end;
+	}
+
 	vector<unique_ptr<DataChunkWrapper>> &Chunks() {
 		return chunks;
 	}
@@ -371,6 +384,9 @@ private:
 	//! Minimum batch index that will ever appear in this stream; piggybacked on every ordered message so
 	//! the server can initialise its delivery cursor and start draining as soon as batches are complete.
 	optional_idx batch_watermark;
+	//! Set only on dead-range markers: batches [batch_index, dead_range_end) are dead (a filtered/pruned
+	//! gap the sink never crossed). Lets the server skip the gap instead of stalling. Invalid on data messages.
+	optional_idx dead_range_end;
 };
 
 // Success reply to a SendDataRequestMessage. `accept_budget` is a placeholder for a future flow-control
