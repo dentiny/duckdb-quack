@@ -34,14 +34,13 @@ QuackClient::~QuackClient() {
 // TODO: This is not very clean, but I do think that for async IO we need
 // decoupling of requests from serialization
 void QuackClient::LogRequest(MessageType request_type, const string &connection_id, optional_idx client_query_id,
-                              const string &query, int64_t duration_ms, MessageType response_type,
-                              const string &error) {
+                             const string &query, int64_t duration_ms, MessageType response_type, const string &error) {
 	auto &logger = Logger::Get(db);
 	if (!logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL)) {
 		return;
 	}
 	auto msg = QuackLogType::ConstructLogMessage(request_type, connection_id, client_query_id, query, uri.Http(),
-	                                              duration_ms, response_type, error);
+	                                             duration_ms, response_type, error);
 	logger.WriteLog(QuackLogType::NAME, QuackLogType::LEVEL, msg);
 }
 
@@ -159,9 +158,9 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 		// Use context-level logger when available for per-query log attribution; fall back to db-level.
 		auto &logger = context ? Logger::Get(*context) : Logger::Get(db);
 		if (logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL)) {
-			auto msg = QuackLogType::ConstructLogMessage(request_type, connection_id, client_query_id, query,
-			                                              uri.Http(), end_time - start_time, response_message->Type(),
-			                                              error);
+			auto msg =
+			    QuackLogType::ConstructLogMessage(request_type, connection_id, client_query_id, query, uri.Http(),
+			                                      end_time - start_time, response_message->Type(), error);
 			logger.WriteLog(QuackLogType::NAME, QuackLogType::LEVEL, msg);
 		}
 	}

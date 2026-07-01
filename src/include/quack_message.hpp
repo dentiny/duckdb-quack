@@ -355,6 +355,7 @@ public:
 	optional_idx BatchWatermark() const {
 		return batch_watermark;
 	}
+
 protected:
 	SendDataRequestMessage() : QuackMessage(TYPE) {
 	}

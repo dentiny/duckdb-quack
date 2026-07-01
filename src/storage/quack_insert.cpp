@@ -142,8 +142,7 @@ public:
 			response->Cast<ErrorResponse>().Error().Throw();
 		}
 		if (response->Type() != SendDataResponseMessage::TYPE) {
-			throw IOException("Expected send_data_response, got %s instead",
-			                  MessageTypeToString(response->Type()));
+			throw IOException("Expected send_data_response, got %s instead", MessageTypeToString(response->Type()));
 		}
 	}
 
@@ -173,10 +172,9 @@ static void SendChunks(ClientContext &context, const QuackInsert &insert, QuackI
 		wrappers.push_back(make_uniq<DataChunkWrapper>(*chunk));
 	}
 
-	auto send_msg = make_uniq<SendDataRequestMessage>(quack_catalog.GetConnectionId(),
-	                                                   tbl.schema.name.GetIdentifierName(),
-	                                                   tbl.name.GetIdentifierName(), std::move(wrappers),
-	                                                   gstate.query_uuid);
+	auto send_msg =
+	    make_uniq<SendDataRequestMessage>(quack_catalog.GetConnectionId(), tbl.schema.name.GetIdentifierName(),
+	                                      tbl.name.GetIdentifierName(), std::move(wrappers), gstate.query_uuid);
 
 	switch (insert.order_mode) {
 	case AppendOrderMode::PARALLEL_ORDERED:
@@ -215,8 +213,8 @@ static void SendChunks(ClientContext &context, const QuackInsert &insert, QuackI
 	auto connection_id = quack_catalog.GetConnectionId();
 	auto client_wrapper = quack_catalog.GetClientConnection()->GetClient(context);
 	gstate.queue->Register(make_uniq<QuackSendDataTask>(std::move(client_wrapper), std::move(payload), payload_size,
-	                                                     std::move(connection_id), client_query_id),
-	                        payload_size);
+	                                                    std::move(connection_id), client_query_id),
+	                       payload_size);
 }
 
 // Flush lstate.buffer with the given is_last_in_batch flag. For PARALLEL_ORDERED, sends a zero-chunk

@@ -95,8 +95,7 @@ static void RunInsertStatement(QuackConnection &connection, shared_ptr<QuackData
 
 //! Detach the active stream (briefly under the lifecycle lock) then finish + join it. Returns any
 //! error the INSERT produced. Safe to call when there is no active stream (returns an empty error).
-static ErrorData FinalizeInsertStream(QuackConnection &connection,
-                                      optional_idx watermark = optional_idx()) {
+static ErrorData FinalizeInsertStream(QuackConnection &connection, optional_idx watermark = optional_idx()) {
 	auto detached = DetachInsertStream(connection);
 	if (watermark.IsValid() && detached.stream) {
 		detached.stream->SetWatermarkAndDrain(watermark);
