@@ -53,10 +53,6 @@ public:
 	unique_ptr<ManagedAsyncTaskQueue> queue;
 	//! Monotonic batch counter for SERIAL_ORDERED mode (single-threaded, so plain idx_t is fine).
 	idx_t serial_batch_counter = 0;
-	//! Minimum batch index sent across all threads; passed to the server in FINALIZE so it can drain
-	//! ordered_pending in ascending order. Protected by min_batch_lock.
-	optional_idx stream_min_batch;
-	annotated_mutex min_batch_lock;
 
 	//! Dead-range gap tracking (PARALLEL_ORDERED), guarded by gap_lock: a batch index is "live" once a thread
 	//! produces rows for it; never-claimed indices below the floor are dead and get a dead-range marker.
@@ -66,6 +62,8 @@ public:
 	idx_t max_floor = 0;
 	//! Largest settled live batch; the lower bound for the next inter-batch dead range.
 	optional_idx last_settled_live;
+	//! Firm lower bound on the lowest batch, sent as the constant seed watermark. Set in CloseDeadGaps.
+	optional_idx stream_floor;
 };
 
 class QuackInsertLocalState : public LocalSinkState {
@@ -187,19 +185,21 @@ static void SendChunks(ClientContext &context, const QuackInsert &insert, QuackI
 	                                      tbl.name.GetIdentifierName(), std::move(wrappers), gstate.query_uuid);
 
 	switch (insert.order_mode) {
-	case AppendOrderMode::PARALLEL_ORDERED:
+	case AppendOrderMode::PARALLEL_ORDERED: {
 		D_ASSERT(lstate.current_batch.IsValid());
 		send_msg->SetOrdering(lstate.current_batch, lstate.sequence_counter++, is_last_in_batch);
-		send_msg->SetBatchWatermark(gstate.stream_min_batch);
+		annotated_lock_guard<annotated_mutex> lk(gstate.gap_lock);
+		send_msg->SetBatchWatermark(gstate.stream_floor);
 		break;
+	}
 	case AppendOrderMode::SERIAL_ORDERED: {
 		idx_t batch = gstate.serial_batch_counter++;
-		if (batch == 0) {
-			annotated_lock_guard<annotated_mutex> lk(gstate.min_batch_lock);
-			gstate.stream_min_batch = optional_idx(0);
-		}
 		send_msg->SetOrdering(optional_idx(batch), 0, true);
-		send_msg->SetBatchWatermark(gstate.stream_min_batch);
+		annotated_lock_guard<annotated_mutex> lk(gstate.gap_lock);
+		if (!gstate.stream_floor.IsValid()) {
+			gstate.stream_floor = optional_idx(0); // serial batches are dense from 0
+		}
+		send_msg->SetBatchWatermark(gstate.stream_floor);
 		break;
 	}
 	case AppendOrderMode::UNORDERED:
@@ -277,6 +277,13 @@ static void CloseDeadGaps(ClientContext &context, const QuackInsert &insert, Qua
 		if (floor > gstate.max_floor) {
 			gstate.max_floor = floor;
 		}
+		// Lowest min_batch_index seen (skip the idx_t max that FINALIZE passes to flush everything): a firm lower
+		// bound sent as the server's constant seed watermark. It can be one below the lowest real batch (an
+		// unproduced thread's placeholder), which the leading marker covers.
+		if (floor != NumericLimits<idx_t>::Maximum() &&
+		    (!gstate.stream_floor.IsValid() || floor < gstate.stream_floor.GetIndex())) {
+			gstate.stream_floor = optional_idx(floor);
+		}
 		// Settle every live batch now strictly below the floor, emitting the dead gap to its predecessor.
 		while (!gstate.live_batches.empty()) {
 			idx_t b = *gstate.live_batches.begin();
@@ -284,8 +291,13 @@ static void CloseDeadGaps(ClientContext &context, const QuackInsert &insert, Qua
 				break; // not settled — a lower batch could still appear
 			}
 			gstate.live_batches.erase(gstate.live_batches.begin());
-			if (gstate.last_settled_live.IsValid() && b > gstate.last_settled_live.GetIndex() + 1) {
-				to_emit.emplace_back(gstate.last_settled_live.GetIndex() + 1, b);
+			if (gstate.last_settled_live.IsValid()) {
+				if (b > gstate.last_settled_live.GetIndex() + 1) {
+					to_emit.emplace_back(gstate.last_settled_live.GetIndex() + 1, b);
+				}
+			} else if (gstate.stream_floor.IsValid() && b > gstate.stream_floor.GetIndex()) {
+				// Leading gap: advance the server's cursor from the seed up to the first real batch.
+				to_emit.emplace_back(gstate.stream_floor.GetIndex(), b);
 			}
 			gstate.last_settled_live = optional_idx(b);
 		}
@@ -362,16 +374,7 @@ SinkNextBatchType QuackInsert::NextBatch(ExecutionContext &context, OperatorSink
 	auto &local_state = input.local_state.Cast<QuackInsertLocalState>();
 	auto new_batch = input.local_state.partition_info.batch_index;
 
-	// Track the minimum batch index seen across all threads for the FINALIZE watermark.
-	if (!local_state.current_batch.IsValid() && new_batch.IsValid()) {
-		annotated_lock_guard<annotated_mutex> lk(global_state.min_batch_lock);
-		if (!global_state.stream_min_batch.IsValid() ||
-		    new_batch.GetIndex() < global_state.stream_min_batch.GetIndex()) {
-			global_state.stream_min_batch = new_batch;
-		}
-	}
-
-	// Record the new batch as live and emit dead-range markers for any gaps the rising floor has confirmed.
+	// Record the new batch as live, capture the firm floor, and emit dead-range markers for confirmed gaps.
 	auto floor = input.local_state.partition_info.min_batch_index;
 	CloseDeadGaps(context.client, *this, global_state, new_batch, floor.IsValid() ? floor.GetIndex() : 0);
 
@@ -421,7 +424,12 @@ SinkFinalizeType QuackInsert::Finalize(Pipeline &pipeline, Event &event, ClientC
 	auto client_wrapper = client_connection->GetClient(context);
 	auto &client = client_wrapper->GetClient();
 	auto finalize_msg = make_uniq<FinalizeMessage>(quack_catalog.GetConnectionId(), global_state.query_uuid);
-	finalize_msg->SetMinBatchWatermark(global_state.stream_min_batch);
+	optional_idx stream_floor;
+	{
+		annotated_lock_guard<annotated_mutex> lk(global_state.gap_lock);
+		stream_floor = global_state.stream_floor;
+	}
+	finalize_msg->SetMinBatchWatermark(stream_floor);
 	client.Request<SuccessResponse>(context, std::move(finalize_msg));
 	return SinkFinalizeType::READY;
 }
