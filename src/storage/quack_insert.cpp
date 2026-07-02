@@ -238,7 +238,7 @@ static void SendDeadRange(ClientContext &context, QuackInsertGlobalState &gstate
 	QuackClient::EncodeRequest(context, *send_msg, *payload);
 	auto payload_size = payload->GetPosition();
 
-	auto connection_id = send_msg->ConnectionId();
+	auto connection_id = quack_catalog.GetConnectionId();
 	auto client_query_id = send_msg->ClientQueryId();
 	auto client_wrapper = quack_catalog.GetClientConnection()->GetClient(context);
 	gstate.queue->Register(make_uniq<QuackSendDataTask>(std::move(client_wrapper), std::move(payload), payload_size,
