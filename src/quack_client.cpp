@@ -221,6 +221,11 @@ shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &co
 	// submit the connection request
 	auto connection_request_response =
 	    client->Request<ConnectionResponseMessage>(context, make_uniq<ConnectionRequestMessage>(token));
+	// Validate the server's selected protocol version before trusting the connection (client speaks QUACK_VERSION).
+	if (connection_request_response->QuackVersion() != QUACK_VERSION) {
+		throw IOException("Incompatible Quack protocol version: server uses %llu, client supports %llu",
+		                  connection_request_response->QuackVersion(), QUACK_VERSION);
+	}
 	// success! we got a connection id
 	auto connection_id = connection_request_response->ConnectionId();
 	idx_t pool_size = MaxValue<idx_t>(1, (idx_t)TaskScheduler::GetScheduler(context).NumberOfAsyncThreads());
