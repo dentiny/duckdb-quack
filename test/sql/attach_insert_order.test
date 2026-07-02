@@ -245,6 +245,38 @@ select count(*), sum(i) from rpc.t_fast;
 statement ok
 reset preserve_insertion_order;
 
+# --- Seeding race: a slow leading row group (expensive md5 column on group 0) means a later batch is
+# produced and sent before the earlier one. The watermark must be a firm lower bound so the server does
+# not seed its delivery cursor too high and drop the slow earlier batch.
+statement ok
+SET threads=2;
+
+statement ok
+copy (
+    select i, case when i < 50000 then md5(i::varchar) else 'x' end as s
+    from range(300000) t(i)
+) to '{TEST_DIR}/slow_leading.parquet' (row_group_size 50000);
+
+statement ok
+create table rpc.t_race(i bigint, l bigint);
+
+statement ok
+insert into rpc.t_race
+select i, length(s)
+from read_parquet('{TEST_DIR}/slow_leading.parquet')
+where i < 4096 or (i >= 200000 and i < 204096);
+
+query III
+select count(*), min(i), max(i) from rpc.t_race;
+----
+8192	0	204095
+
+query I
+select count(*) from (select i, row_number() over () - 1 as rn from rpc.t_race)
+where (rn < 4096 and i != rn) or (rn >= 4096 and i != rn + 195904);
+----
+0
+
 statement ok con2
 detach rpc;
 
