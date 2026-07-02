@@ -95,6 +95,16 @@ where message_type = 'SEND_DATA_REQUEST' and server is not null and server != ''
 ----
 true
 
+# Async SEND_DATA POSTs log through the context logger captured on the producer thread, so client-side
+# SEND_DATA logs are CONNECTION-scoped and carry the query's context ids. Assert none is mis-attributed
+# (previously these were DATABASE-scoped with null query_id/transaction_id, emitted via the db logger).
+query I
+select count(*) from duckdb_logs_parsed('Quack')
+where message_type = 'SEND_DATA_REQUEST' and server is not null and server != ''
+  and (scope != 'CONNECTION' or query_id is null or transaction_id is null);
+----
+0
+
 statement ok
 reset quack_send_data_flush_rows;
 
