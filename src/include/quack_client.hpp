@@ -36,8 +36,17 @@ public:
 	//! pass context=nullptr when called off the execution thread (parameters fall back to the database).
 	virtual string PostRaw(optional_ptr<ClientContext> context, const_data_ptr_t data, idx_t size) = 0;
 
-	//! Emit a Quack request log entry. Safe to call from an async pool thread (uses db-level logger).
-	void LogRequest(MessageType request_type, const string &connection_id, optional_idx client_query_id,
+	//! Encode a request (inject client_query_id when a query is active, then serialize) into `out`.
+	//! Protocol-level and lock-free; the caller owns `out` and any locking around it.
+	static void EncodeRequest(optional_ptr<ClientContext> context, QuackMessage &message, MemoryStream &out);
+
+	//! Decode a response body (owned bytes) into a message. Protocol-level and lock-free.
+	static unique_ptr<QuackMessage> DecodeResponse(const string &response_body);
+
+	//! Emit a Quack request log entry through `logger`. Pass the query's context logger for per-query
+	//! attribution (connection/transaction/query id columns); the db logger only fits context-less
+	//! teardown. Safe from an async pool thread when handed a captured context logger.
+	void LogRequest(Logger &logger, MessageType request_type, const string &connection_id, optional_idx client_query_id,
 	                const string &query, int64_t duration_ms, MessageType response_type, const string &error);
 
 	static unique_ptr<QuackClient> GetClient(DatabaseInstance &db, const QuackUri &uri);
@@ -46,8 +55,11 @@ public:
 	static shared_ptr<QuackClientConnection> ConnectToServer(ClientContext &context, const QuackUri &uri, string token);
 
 protected:
+	//! Resolve the logger for a request: the context (per-query) logger when available, else the db logger.
+	Logger &GetRequestLogger(optional_ptr<ClientContext> context);
+
 	mutex request_mutex;
-	MemoryStream read_stream, write_stream;
+	MemoryStream write_stream;
 	DatabaseInstance &db;
 	QuackUri uri;
 
@@ -107,6 +119,8 @@ private:
 	                                         unique_ptr<QuackMessage> request_message) override;
 	//! POST bytes assuming request_mutex is already held.
 	string PostRawLocked(const_data_ptr_t data, idx_t size);
+	//! Lazily initialise http_params (context-aware); assumes request_mutex is held.
+	void EnsureHttpParams(optional_ptr<ClientContext> context);
 
 private:
 	unique_ptr<HTTPParams> http_params;
