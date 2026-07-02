@@ -6,7 +6,16 @@
 #include "quack_client.hpp"
 #include "quack_uri.hpp"
 
+#include <chrono>
+
 namespace duckdb {
+
+static int64_t NowMillis() {
+	return std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
+	    .time_since_epoch()
+	    .count();
+}
+
 template <class T>
 string GetUriPart(T ele) {
 	if (ele.afterLast - ele.first < 1) {
@@ -31,11 +40,31 @@ QuackClient::QuackClient(DatabaseInstance &db_p, const QuackUri &uri_p) : db(db_
 QuackClient::~QuackClient() {
 }
 
-// TODO: This is not very clean, but I do think that for async IO we need
-// decoupling of requests from serialization
-void QuackClient::LogRequest(MessageType request_type, const string &connection_id, optional_idx client_query_id,
-                             const string &query, int64_t duration_ms, MessageType response_type, const string &error) {
-	auto &logger = Logger::Get(db);
+void QuackClient::EncodeRequest(optional_ptr<ClientContext> context, QuackMessage &message, MemoryStream &out) {
+	// Inject client_query_id from the active query so client and server logs correlate. Guard against
+	// transaction start (e.g. BEGIN via QuackCatalog::ExecuteCommand), where the transaction isn't yet
+	// installed on the TransactionContext and there is no active query to read.
+	if (context && context->transaction.HasActiveTransaction()) {
+		auto raw_query_id = context->transaction.GetActiveQuery();
+		if (raw_query_id != DConstants::INVALID_INDEX) {
+			message.SetClientQueryId(raw_query_id);
+		}
+	}
+	message.ToMemoryStream(out);
+}
+
+unique_ptr<QuackMessage> QuackClient::DecodeResponse(const string &response_body) {
+	MemoryStream read_stream((data_ptr_t)response_body.data(), response_body.size());
+	return QuackMessage::FromMemoryStream(read_stream);
+}
+
+Logger &QuackClient::GetRequestLogger(optional_ptr<ClientContext> context) {
+	return context ? Logger::Get(*context) : Logger::Get(db);
+}
+
+void QuackClient::LogRequest(Logger &logger, MessageType request_type, const string &connection_id,
+                             optional_idx client_query_id, const string &query, int64_t duration_ms,
+                             MessageType response_type, const string &error) {
 	if (!logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL)) {
 		return;
 	}
@@ -69,17 +98,22 @@ string HttpsQuackClient::PostRawLocked(const_data_ptr_t data, idx_t size) {
 	return std::move(post_request.buffer_out);
 }
 
+void HttpsQuackClient::EnsureHttpParams(optional_ptr<ClientContext> context) {
+	if (http_params) {
+		return;
+	}
+	auto &http_util = HTTPUtil::Get(db);
+	auto request_url = uri.Http() + "/quack";
+	if (context && context->transaction.HasActiveTransaction()) {
+		http_params = http_util.InitializeParameters(*context, request_url);
+	} else {
+		http_params = http_util.InitializeParameters(db, request_url);
+	}
+}
+
 string HttpsQuackClient::PostRaw(optional_ptr<ClientContext> context, const_data_ptr_t data, idx_t size) {
 	lock_guard<mutex> guard(request_mutex);
-	if (!http_params) {
-		auto &http_util = HTTPUtil::Get(db);
-		auto request_url = uri.Http() + "/quack";
-		if (context && context->transaction.HasActiveTransaction()) {
-			http_params = http_util.InitializeParameters(*context, request_url);
-		} else {
-			http_params = http_util.InitializeParameters(db, request_url);
-		}
-	}
+	EnsureHttpParams(context);
 	return PostRawLocked(data, size);
 }
 
@@ -88,82 +122,21 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 	D_ASSERT(request_message);
 
 	lock_guard<mutex> guard(request_mutex);
+	EnsureHttpParams(context);
 
-	auto &http_util = HTTPUtil::Get(db);
-	auto request_url = uri.Http() + "/quack";
-	if (!http_params) {
-		if (context && context->transaction.HasActiveTransaction()) {
-			http_params = http_util.InitializeParameters(*context, request_url);
-		} else {
-			http_params = http_util.InitializeParameters(db, request_url);
-		}
+	int64_t start_time = NowMillis();
+	EncodeRequest(context, *request_message, write_stream);
+	auto response_body = PostRawLocked(write_stream.GetData(), write_stream.GetPosition());
+	auto response_message = DecodeResponse(response_body);
+	int64_t duration_ms = NowMillis() - start_time;
+
+	string error;
+	if (response_message->Type() == MessageType::ERROR_RESPONSE) {
+		error = response_message->Cast<ErrorResponse>().ErrorMessage();
 	}
-
-	// Inject client_query_id from context into the message before sending.
-	// Guard against reading the active query during transaction start itself
-	// (e.g. BEGIN TRANSACTION via QuackCatalog::ExecuteCommand), where the
-	// transaction isn't yet installed on the TransactionContext.
-	optional_idx client_query_id;
-	if (context && context->transaction.HasActiveTransaction()) {
-		auto raw_query_id = context->transaction.GetActiveQuery();
-		if (raw_query_id != DConstants::INVALID_INDEX) {
-			client_query_id = raw_query_id;
-			request_message->SetClientQueryId(client_query_id);
-		}
-	}
-
-	int64_t start_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
-	                         .time_since_epoch()
-	                         .count();
-
-	request_message->ToMemoryStream(write_stream);
-	auto buffer_out = PostRawLocked(write_stream.GetData(), write_stream.GetPosition());
-
-	MemoryStream non_owning_read_stream((data_ptr_t)buffer_out.data(), buffer_out.size());
-	auto response_message = QuackMessage::FromMemoryStream(non_owning_read_stream);
-
-	// logging stuff, own scope
-	{
-		int64_t end_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
-		                       .time_since_epoch()
-		                       .count();
-
-		auto request_type = request_message->Type();
-		string connection_id;
-		string query;
-		switch (request_type) {
-		case MessageType::PREPARE_REQUEST: {
-			auto &msg = request_message->Cast<PrepareRequestMessage>();
-			connection_id = msg.ConnectionId();
-			query = msg.Query();
-			break;
-		}
-		case MessageType::FETCH_REQUEST:
-			connection_id = request_message->Cast<FetchRequestMessage>().ConnectionId();
-			break;
-		case MessageType::SEND_DATA_REQUEST:
-			connection_id = request_message->Cast<SendDataRequestMessage>().ConnectionId();
-			break;
-		case MessageType::FINALIZE:
-			connection_id = request_message->Cast<FinalizeMessage>().ConnectionId();
-			break;
-		default:
-			break;
-		}
-
-		string error;
-		if (response_message->Type() == MessageType::ERROR_RESPONSE) {
-			error = response_message->Cast<ErrorResponse>().ErrorMessage();
-		}
-		// Use context-level logger when available for per-query log attribution; fall back to db-level.
-		auto &logger = context ? Logger::Get(*context) : Logger::Get(db);
-		if (logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL)) {
-			auto msg =
-			    QuackLogType::ConstructLogMessage(request_type, connection_id, client_query_id, query, uri.Http(),
-			                                      end_time - start_time, response_message->Type(), error);
-			logger.WriteLog(QuackLogType::NAME, QuackLogType::LEVEL, msg);
-		}
-	}
+	LogRequest(GetRequestLogger(context), request_message->Type(), request_message->ConnectionId(),
+	           request_message->ClientQueryId(), request_message->LoggableQuery(), duration_ms,
+	           response_message->Type(), error);
 
 	return response_message;
 }

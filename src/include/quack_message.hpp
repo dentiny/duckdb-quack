@@ -110,6 +110,12 @@ public:
 		return header.connection_id;
 	}
 
+	//! SQL text to record in request logs; empty for message types that carry none.
+	virtual const string &LoggableQuery() const {
+		static const string empty;
+		return empty;
+	}
+
 	void SetHeader(MessageHeader header_p) {
 		header = std::move(header_p);
 	}
@@ -132,6 +138,9 @@ public:
 
 public:
 	const string &Query() const {
+		return sql_query;
+	}
+	const string &LoggableQuery() const override {
 		return sql_query;
 	}
 	hugeint_t QueryUUID() const {

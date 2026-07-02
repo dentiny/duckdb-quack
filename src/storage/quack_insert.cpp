@@ -124,9 +124,10 @@ static int64_t NowMillis() {
 class QuackSendDataTask : public AsyncTask {
 public:
 	QuackSendDataTask(unique_ptr<QuackClientWrapper> client_wrapper_p, unique_ptr<MemoryStream> payload_p,
-	                  idx_t payload_size_p, string connection_id_p, optional_idx client_query_id_p)
+	                  idx_t payload_size_p, string connection_id_p, optional_idx client_query_id_p,
+	                  shared_ptr<Logger> logger_p)
 	    : client_wrapper(std::move(client_wrapper_p)), payload(std::move(payload_p)), payload_size(payload_size_p),
-	      connection_id(std::move(connection_id_p)), client_query_id(client_query_id_p) {
+	      connection_id(std::move(connection_id_p)), client_query_id(client_query_id_p), logger(std::move(logger_p)) {
 	}
 
 	void Execute() override {
@@ -136,15 +137,16 @@ public:
 		auto response_body = client.PostRaw(nullptr, payload->GetData(), payload_size);
 		auto duration_ms = NowMillis() - start_time;
 
-		MemoryStream read_stream((data_ptr_t)response_body.data(), response_body.size());
-		auto response = QuackMessage::FromMemoryStream(read_stream);
+		auto response = QuackClient::DecodeResponse(response_body);
 
 		string error;
 		if (response->Type() == MessageType::ERROR_RESPONSE) {
 			error = response->Cast<ErrorResponse>().ErrorMessage();
 		}
-		client.LogRequest(MessageType::SEND_DATA_REQUEST, connection_id, client_query_id, string(), duration_ms,
-		                  response->Type(), error);
+		// Log through the context logger captured on the producer thread, so async SEND_DATA logs carry the
+		// query's connection/transaction/query id (the pool thread has no ClientContext).
+		client.LogRequest(Logger::Get(logger), MessageType::SEND_DATA_REQUEST, connection_id, client_query_id, string(),
+		                  duration_ms, response->Type(), error);
 
 		if (response->Type() == MessageType::ERROR_RESPONSE) {
 			response->Cast<ErrorResponse>().Error().Throw();
@@ -160,6 +162,7 @@ private:
 	idx_t payload_size;
 	string connection_id;
 	optional_idx client_query_id;
+	shared_ptr<Logger> logger;
 };
 
 //===--------------------------------------------------------------------===//
@@ -206,24 +209,16 @@ static void SendChunks(ClientContext &context, const QuackInsert &insert, QuackI
 		break;
 	}
 
-	// Read client_query_id on this regular thread; the async task must not touch ClientContext.
-	optional_idx client_query_id;
-	if (context.transaction.HasActiveTransaction()) {
-		auto raw_query_id = context.transaction.GetActiveQuery();
-		if (raw_query_id != DConstants::INVALID_INDEX) {
-			client_query_id = raw_query_id;
-			send_msg->SetClientQueryId(raw_query_id);
-		}
-	}
-
+	// Encode on the producer thread: the async task runs off-thread and must not touch ClientContext.
 	auto payload = make_uniq<MemoryStream>();
-	send_msg->ToMemoryStream(*payload);
+	QuackClient::EncodeRequest(context, *send_msg, *payload);
 	auto payload_size = payload->GetPosition();
 
-	auto connection_id = quack_catalog.GetConnectionId();
+	auto connection_id = send_msg->ConnectionId();
+	auto client_query_id = send_msg->ClientQueryId();
 	auto client_wrapper = quack_catalog.GetClientConnection()->GetClient(context);
 	gstate.queue->Register(make_uniq<QuackSendDataTask>(std::move(client_wrapper), std::move(payload), payload_size,
-	                                                    std::move(connection_id), client_query_id),
+	                                                    std::move(connection_id), client_query_id, context.logger),
 	                       payload_size);
 }
 
@@ -238,23 +233,16 @@ static void SendDeadRange(ClientContext &context, QuackInsertGlobalState &gstate
 	                                                  vector<unique_ptr<DataChunkWrapper>>(), gstate.query_uuid);
 	send_msg->SetDeadRange(lo, hi);
 
-	optional_idx client_query_id;
-	if (context.transaction.HasActiveTransaction()) {
-		auto raw_query_id = context.transaction.GetActiveQuery();
-		if (raw_query_id != DConstants::INVALID_INDEX) {
-			client_query_id = raw_query_id;
-			send_msg->SetClientQueryId(raw_query_id);
-		}
-	}
-
+	// Encode on the producer thread: the async task runs off-thread and must not touch ClientContext.
 	auto payload = make_uniq<MemoryStream>();
-	send_msg->ToMemoryStream(*payload);
+	QuackClient::EncodeRequest(context, *send_msg, *payload);
 	auto payload_size = payload->GetPosition();
 
 	auto connection_id = quack_catalog.GetConnectionId();
+	auto client_query_id = send_msg->ClientQueryId();
 	auto client_wrapper = quack_catalog.GetClientConnection()->GetClient(context);
 	gstate.queue->Register(make_uniq<QuackSendDataTask>(std::move(client_wrapper), std::move(payload), payload_size,
-	                                                    std::move(connection_id), client_query_id),
+	                                                    std::move(connection_id), client_query_id, context.logger),
 	                       payload_size);
 }
 
