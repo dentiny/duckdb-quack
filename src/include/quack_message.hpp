@@ -7,6 +7,9 @@
 
 namespace duckdb {
 
+//! Quack wire-protocol version. Client and server agree on it during the connection handshake.
+static constexpr idx_t QUACK_VERSION = 2;
+
 enum class MessageType : uint8_t {
 	INVALID = 0,
 	CONNECTION_REQUEST = 1,
