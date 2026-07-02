@@ -1,6 +1,7 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
+#include "duckdb/parallel/task_scheduler.hpp"
 
 #include "quack_client.hpp"
 #include "quack_uri.hpp"
@@ -30,9 +31,56 @@ QuackClient::QuackClient(DatabaseInstance &db_p, const QuackUri &uri_p) : db(db_
 QuackClient::~QuackClient() {
 }
 
+// TODO: This is not very clean, but I do think that for async IO we need
+// decoupling of requests from serialization
+void QuackClient::LogRequest(MessageType request_type, const string &connection_id, optional_idx client_query_id,
+                             const string &query, int64_t duration_ms, MessageType response_type, const string &error) {
+	auto &logger = Logger::Get(db);
+	if (!logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL)) {
+		return;
+	}
+	auto msg = QuackLogType::ConstructLogMessage(request_type, connection_id, client_query_id, query, uri.Http(),
+	                                             duration_ms, response_type, error);
+	logger.WriteLog(QuackLogType::NAME, QuackLogType::LEVEL, msg);
+}
+
 HttpsQuackClient::HttpsQuackClient(DatabaseInstance &db, const QuackUri &uri_p) : QuackClient(db, uri_p) {};
 
 HttpsQuackClient::~HttpsQuackClient() {
+}
+
+string HttpsQuackClient::PostRawLocked(const_data_ptr_t data, idx_t size) {
+	D_ASSERT(http_params);
+	auto &http_util = HTTPUtil::Get(db);
+	auto request_url = uri.Http() + "/quack";
+	HTTPHeaders headers;
+	PostRequestInfo post_request(request_url, headers, *http_params, data, size);
+	unique_ptr<HTTPResponse> response;
+	try {
+		response = http_util.Request(post_request);
+	} catch (std::exception &ex) {
+		ErrorData error(ex);
+		throw IOException("Failed to send message: %s", error.Message());
+	}
+	if (!response || !response->Success()) {
+		string error = response ? response->GetError() : "no response";
+		throw IOException("Failed to send message: %s", error);
+	}
+	return std::move(post_request.buffer_out);
+}
+
+string HttpsQuackClient::PostRaw(optional_ptr<ClientContext> context, const_data_ptr_t data, idx_t size) {
+	lock_guard<mutex> guard(request_mutex);
+	if (!http_params) {
+		auto &http_util = HTTPUtil::Get(db);
+		auto request_url = uri.Http() + "/quack";
+		if (context && context->transaction.HasActiveTransaction()) {
+			http_params = http_util.InitializeParameters(*context, request_url);
+		} else {
+			http_params = http_util.InitializeParameters(db, request_url);
+		}
+	}
+	return PostRawLocked(data, size);
 }
 
 unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientContext> context,
@@ -51,8 +99,6 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 		}
 	}
 
-	HTTPHeaders headers;
-
 	// Inject client_query_id from context into the message before sending.
 	// Guard against reading the active query during transaction start itself
 	// (e.g. BEGIN TRANSACTION via QuackCatalog::ExecuteCommand), where the
@@ -66,28 +112,14 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 		}
 	}
 
-	request_message->ToMemoryStream(write_stream);
-	PostRequestInfo post_request(request_url, headers, *http_params, write_stream.GetData(),
-	                             write_stream.GetPosition());
-	unique_ptr<HTTPResponse> response;
-
-	// Time the request
 	int64_t start_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
 	                         .time_since_epoch()
 	                         .count();
 
-	try {
-		response = http_util.Request(post_request);
-	} catch (std::exception &ex) {
-		ErrorData error(ex);
-		throw IOException("Failed to send message: %s", error.Message());
-	}
-	if (!response || !response->Success()) {
-		string error = response ? response->GetError() : "no response";
-		throw IOException("Failed to send message: %s", error);
-	}
+	request_message->ToMemoryStream(write_stream);
+	auto buffer_out = PostRawLocked(write_stream.GetData(), write_stream.GetPosition());
 
-	MemoryStream non_owning_read_stream((data_ptr_t)post_request.buffer_out.data(), post_request.buffer_out.size());
+	MemoryStream non_owning_read_stream((data_ptr_t)buffer_out.data(), buffer_out.size());
 	auto response_message = QuackMessage::FromMemoryStream(non_owning_read_stream);
 
 	// logging stuff, own scope
@@ -99,7 +131,6 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 		auto request_type = request_message->Type();
 		string connection_id;
 		string query;
-		optional_idx client_query_id;
 		switch (request_type) {
 		case MessageType::PREPARE_REQUEST: {
 			auto &msg = request_message->Cast<PrepareRequestMessage>();
@@ -120,13 +151,13 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 			break;
 		}
 
-		// Log RPC message
+		string error;
+		if (response_message->Type() == MessageType::ERROR_RESPONSE) {
+			error = response_message->Cast<ErrorResponse>().ErrorMessage();
+		}
+		// Use context-level logger when available for per-query log attribution; fall back to db-level.
 		auto &logger = context ? Logger::Get(*context) : Logger::Get(db);
 		if (logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL)) {
-			string error;
-			if (response_message->Type() == MessageType::ERROR_RESPONSE) {
-				error = response_message->Cast<ErrorResponse>().ErrorMessage();
-			}
 			auto msg =
 			    QuackLogType::ConstructLogMessage(request_type, connection_id, client_query_id, query, uri.Http(),
 			                                      end_time - start_time, response_message->Type(), error);
@@ -190,10 +221,15 @@ shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &co
 	// submit the connection request
 	auto connection_request_response =
 	    client->Request<ConnectionResponseMessage>(context, make_uniq<ConnectionRequestMessage>(token));
+	// Validate the server's selected protocol version before trusting the connection (client speaks QUACK_VERSION).
+	if (connection_request_response->QuackVersion() != QUACK_VERSION) {
+		throw IOException("Incompatible Quack protocol version: server uses %llu, client supports %llu",
+		                  connection_request_response->QuackVersion(), QUACK_VERSION);
+	}
 	// success! we got a connection id
-	// construct the client connection and return it
 	auto connection_id = connection_request_response->ConnectionId();
-	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id));
+	idx_t pool_size = MaxValue<idx_t>(1, (idx_t)TaskScheduler::GetScheduler(context).NumberOfAsyncThreads());
+	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id), pool_size);
 }
 
 unique_ptr<QuackClientWrapper> QuackClientConnection::GetClient(ClientContext &context) const {
