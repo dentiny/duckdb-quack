@@ -62,6 +62,10 @@ Logger &QuackClient::GetRequestLogger(optional_ptr<ClientContext> context) {
 	return context ? Logger::Get(*context) : Logger::Get(db);
 }
 
+void QuackClient::SetRequestLogger(shared_ptr<Logger> logger) {
+	request_logger = std::move(logger);
+}
+
 void QuackClient::LogRequest(Logger &logger, MessageType request_type, const string &connection_id,
                              optional_idx client_query_id, const string &query, int64_t duration_ms,
                              MessageType response_type, const string &error) {
@@ -99,15 +103,19 @@ string HttpsQuackClient::PostRawLocked(const_data_ptr_t data, idx_t size) {
 }
 
 void HttpsQuackClient::EnsureHttpParams(optional_ptr<ClientContext> context) {
-	if (http_params) {
-		return;
+	if (!http_params) {
+		auto &http_util = HTTPUtil::Get(db);
+		auto request_url = uri.Http() + "/quack";
+		if (context && context->transaction.HasActiveTransaction()) {
+			http_params = http_util.InitializeParameters(*context, request_url);
+		} else {
+			http_params = http_util.InitializeParameters(db, request_url);
+		}
 	}
-	auto &http_util = HTTPUtil::Get(db);
-	auto request_url = uri.Http() + "/quack";
-	if (context && context->transaction.HasActiveTransaction()) {
-		http_params = http_util.InitializeParameters(*context, request_url);
-	} else {
-		http_params = http_util.InitializeParameters(db, request_url);
+	// http_params is cached across checkouts, so mirror the checkout's logger in each request; the guard
+	// skips the refcount churn when it is unchanged.
+	if (request_logger && http_params->logger != request_logger) {
+		http_params->logger = request_logger;
 	}
 }
 
@@ -216,6 +224,8 @@ unique_ptr<QuackClientWrapper> QuackClientConnection::GetClient(ClientContext &c
 		// instantiate a new client
 		result = QuackClient::GetClient(context, uri);
 	}
+	// Stamp the checking-out query's logger so this client's POSTs (incl. off-thread async sends) are logged.
+	result->SetRequestLogger(context.logger);
 	return make_uniq<QuackClientWrapper>(std::move(result), shared_from_this());
 }
 

@@ -49,6 +49,10 @@ public:
 	void LogRequest(Logger &logger, MessageType request_type, const string &connection_id, optional_idx client_query_id,
 	                const string &query, int64_t duration_ms, MessageType response_type, const string &error);
 
+	//! Stamp the logger for this client's HTTP transport-log entries. Set at checkout so a pooled client
+	//! (incl. an async send whose pool thread has no ClientContext) logs under the checking-out query.
+	void SetRequestLogger(shared_ptr<Logger> logger);
+
 	static unique_ptr<QuackClient> GetClient(DatabaseInstance &db, const QuackUri &uri);
 	static unique_ptr<QuackClient> GetClient(ClientContext &context, const QuackUri &uri);
 
@@ -62,6 +66,8 @@ protected:
 	MemoryStream write_stream;
 	DatabaseInstance &db;
 	QuackUri uri;
+	//! HTTP transport-log logger, stamped at checkout (see SetRequestLogger).
+	shared_ptr<Logger> request_logger;
 
 private:
 	virtual unique_ptr<QuackMessage> RequestInternal(optional_ptr<ClientContext> context,
@@ -119,7 +125,7 @@ private:
 	                                         unique_ptr<QuackMessage> request_message) override;
 	//! POST bytes assuming request_mutex is already held.
 	string PostRawLocked(const_data_ptr_t data, idx_t size);
-	//! Lazily initialise http_params (context-aware); assumes request_mutex is held.
+	//! Lazily initialise http_params (context-aware) and attach request_logger; assumes request_mutex is held.
 	void EnsureHttpParams(optional_ptr<ClientContext> context);
 
 private:
