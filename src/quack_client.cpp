@@ -112,10 +112,14 @@ void HttpsQuackClient::EnsureHttpParams(optional_ptr<ClientContext> context) {
 			http_params = http_util.InitializeParameters(db, request_url);
 		}
 	}
-	// http_params is cached across checkouts, so mirror the checkout's logger in each request; the guard
-	// skips the refcount churn when it is unchanged.
-	if (request_logger && http_params->logger != request_logger) {
-		http_params->logger = request_logger;
+	// http_params is cached across checkouts; re-scope its logger each request so a context-less
+	// teardown on a pooled client never logs under a prior query's scope.
+	if (request_logger) {
+		if (http_params->logger != request_logger) {
+			http_params->logger = request_logger;
+		}
+	} else if (!context) {
+		http_params->logger.reset();
 	}
 }
 
@@ -235,6 +239,8 @@ void QuackClientConnection::StoreClient(unique_ptr<QuackClient> client_p) const 
 		// already exceeded max cache size
 		return;
 	}
+	// A pooled client has no owning query; drop the stamp so later teardown doesn't log under it.
+	client_p->SetRequestLogger(nullptr);
 	cached_clients.push_back(std::move(client_p));
 }
 

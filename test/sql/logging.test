@@ -184,6 +184,44 @@ detach rpc
 statement ok
 SET preserve_insertion_order=true;
 
+# --- HTTP logging (context-less teardown scope) ---
+# A pooled client's DISCONNECT POST is context-less and must not be logged under the
+# connection scope of a query that already ran on that pooled connection.
+
+statement ok
+CALL disable_logging();
+
+statement ok
+CALL enable_logging('HTTP');
+
+statement ok
+attach {server} as rpc_td (token 'asdf')
+
+statement ok
+create table rpc_td.teardown_t(i bigint);
+
+statement ok
+insert into rpc_td.teardown_t values (1);
+
+# sanity: the query's own POSTs are connection-scoped (non-null connection id)
+query I
+select count(*) > 0 from duckdb_logs_parsed('HTTP') where request.type = 'POST' and connection_id is not null
+----
+true
+
+# clear the query's logs so only the detach's DISCONNECT traffic follows
+statement ok
+CALL truncate_duckdb_logs();
+
+statement ok
+detach rpc_td
+
+# the DISCONNECT POST must not carry the finished query's connection id
+query I
+select count(*) = 0 from duckdb_logs_parsed('HTTP') where request.type = 'POST' and connection_id is not null
+----
+true
+
 # clean up
 statement ok
 CALL disable_logging();
