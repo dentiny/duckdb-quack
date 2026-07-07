@@ -76,8 +76,7 @@ private:
 
 class QuackClientConnection : public enable_shared_from_this<QuackClientConnection> {
 public:
-	explicit QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p,
-	                               idx_t max_connections_cached = 1);
+	explicit QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p);
 	~QuackClientConnection();
 
 	void CancelQuery(hugeint_t query_uuid);
@@ -98,8 +97,9 @@ private:
 	QuackUri uri;
 	string connection_id;
 	mutable mutex lock;
+	//! All returned clients are cached; the count is naturally bounded by the high-water mark of
+	//! concurrent checkouts (task pools), and idle sockets are reaped by the server's keep-alive.
 	mutable vector<unique_ptr<QuackClient>> cached_clients;
-	idx_t max_connections_cached;
 };
 
 struct QuackClientWrapper {
@@ -130,6 +130,9 @@ private:
 
 private:
 	unique_ptr<HTTPParams> http_params;
+	//! Persistent keep-alive HTTP client: reused across requests so the TCP connection (and its
+	//! warm congestion window) survives between POSTs; replaced by the retry path on dead sockets.
+	unique_ptr<HTTPClient> http_client;
 };
 
 } // namespace duckdb

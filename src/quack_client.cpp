@@ -1,7 +1,6 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
-#include "duckdb/parallel/task_scheduler.hpp"
 
 #include "quack_client.hpp"
 #include "quack_uri.hpp"
@@ -90,7 +89,7 @@ string HttpsQuackClient::PostRawLocked(const_data_ptr_t data, idx_t size) {
 	PostRequestInfo post_request(request_url, headers, *http_params, data, size);
 	unique_ptr<HTTPResponse> response;
 	try {
-		response = http_util.Request(post_request);
+		response = http_util.Request(post_request, http_client);
 	} catch (std::exception &ex) {
 		ErrorData error(ex);
 		throw IOException("Failed to send message: %s", error.Message());
@@ -162,9 +161,8 @@ unique_ptr<QuackClient> QuackClient::GetClient(ClientContext &context, const Qua
 	return GetClient(*context.db, uri);
 }
 
-QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p,
-                                             idx_t max_connections_cached)
-    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)), max_connections_cached(max_connections_cached) {
+QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p)
+    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)) {
 	if (client_p) {
 		StoreClient(std::move(client_p));
 	}
@@ -209,8 +207,7 @@ shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &co
 	}
 	// success! we got a connection id
 	auto connection_id = connection_request_response->ConnectionId();
-	idx_t pool_size = MaxValue<idx_t>(1, (idx_t)TaskScheduler::GetScheduler(context).NumberOfAsyncThreads());
-	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id), pool_size);
+	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id));
 }
 
 unique_ptr<QuackClientWrapper> QuackClientConnection::GetClient(ClientContext &context) const {
@@ -231,10 +228,6 @@ unique_ptr<QuackClientWrapper> QuackClientConnection::GetClient(ClientContext &c
 
 void QuackClientConnection::StoreClient(unique_ptr<QuackClient> client_p) const {
 	lock_guard<mutex> guard(lock);
-	if (cached_clients.size() >= max_connections_cached) {
-		// already exceeded max cache size
-		return;
-	}
 	cached_clients.push_back(std::move(client_p));
 }
 
