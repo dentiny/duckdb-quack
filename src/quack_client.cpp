@@ -1,6 +1,7 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
+#include "duckdb/parallel/task_scheduler.hpp"
 
 #include "quack_client.hpp"
 #include "quack_uri.hpp"
@@ -111,10 +112,14 @@ void HttpsQuackClient::EnsureHttpParams(optional_ptr<ClientContext> context) {
 			http_params = http_util.InitializeParameters(db, request_url);
 		}
 	}
-	// http_params is cached across checkouts, so mirror the checkout's logger in each request; the guard
-	// skips the refcount churn when it is unchanged.
-	if (request_logger && http_params->logger != request_logger) {
-		http_params->logger = request_logger;
+	// http_params is cached across checkouts; re-scope its logger each request so a context-less
+	// teardown on a pooled client never logs under a prior query's scope.
+	if (request_logger) {
+		if (http_params->logger != request_logger) {
+			http_params->logger = request_logger;
+		}
+	} else if (!context) {
+		http_params->logger.reset();
 	}
 }
 
@@ -161,8 +166,10 @@ unique_ptr<QuackClient> QuackClient::GetClient(ClientContext &context, const Qua
 	return GetClient(*context.db, uri);
 }
 
-QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p)
-    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)) {
+QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p,
+                                             idx_t max_connections_cached_p)
+    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)),
+      max_connections_cached(max_connections_cached_p) {
 	if (client_p) {
 		StoreClient(std::move(client_p));
 	}
@@ -207,7 +214,10 @@ shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &co
 	}
 	// success! we got a connection id
 	auto connection_id = connection_request_response->ConnectionId();
-	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id));
+	// Cache at most one client per async send slot: pending SEND_DATA tasks can check out far more
+	// clients than ever POST concurrently, and each cached client pins a server connection slot.
+	idx_t pool_size = MaxValue<idx_t>(1, (idx_t)TaskScheduler::GetScheduler(context).NumberOfAsyncThreads());
+	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id), pool_size);
 }
 
 unique_ptr<QuackClientWrapper> QuackClientConnection::GetClient(ClientContext &context) const {
@@ -228,6 +238,13 @@ unique_ptr<QuackClientWrapper> QuackClientConnection::GetClient(ClientContext &c
 
 void QuackClientConnection::StoreClient(unique_ptr<QuackClient> client_p) const {
 	lock_guard<mutex> guard(lock);
+	if (cached_clients.size() >= max_connections_cached) {
+		// Beyond the cap, drop the client: destroying it closes its persistent socket, freeing the
+		// server-side connection slot instead of retaining an idle keep-alive the server must carry.
+		return;
+	}
+	// A pooled client has no owning query; drop the stamp so later teardown doesn't log under it.
+	client_p->SetRequestLogger(nullptr);
 	cached_clients.push_back(std::move(client_p));
 }
 
