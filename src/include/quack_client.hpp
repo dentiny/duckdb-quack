@@ -76,7 +76,8 @@ private:
 
 class QuackClientConnection : public enable_shared_from_this<QuackClientConnection> {
 public:
-	explicit QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p);
+	explicit QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p,
+	                               idx_t max_connections_cached = 1);
 	~QuackClientConnection();
 
 	void CancelQuery(hugeint_t query_uuid);
@@ -97,8 +98,9 @@ private:
 	QuackUri uri;
 	string connection_id;
 	mutable mutex lock;
-	//! All returned clients are cached; the count is naturally bounded by the high-water mark of
-	//! concurrent checkouts (task pools), and idle sockets are reaped by the server's keep-alive.
+	//! Bounds cached_clients: each cached client holds a persistent socket that pins a server
+	//! connection slot, so an unbounded cache would let one attach starve the server's budget.
+	idx_t max_connections_cached;
 	mutable vector<unique_ptr<QuackClient>> cached_clients;
 };
 
