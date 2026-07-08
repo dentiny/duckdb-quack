@@ -90,7 +90,7 @@ string HttpsQuackClient::PostRawLocked(const_data_ptr_t data, idx_t size) {
 	PostRequestInfo post_request(request_url, headers, *http_params, data, size);
 	unique_ptr<HTTPResponse> response;
 	try {
-		response = http_util.Request(post_request);
+		response = http_util.Request(post_request, http_client);
 	} catch (std::exception &ex) {
 		ErrorData error(ex);
 		throw IOException("Failed to send message: %s", error.Message());
@@ -167,8 +167,9 @@ unique_ptr<QuackClient> QuackClient::GetClient(ClientContext &context, const Qua
 }
 
 QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p,
-                                             idx_t max_connections_cached)
-    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)), max_connections_cached(max_connections_cached) {
+                                             idx_t max_connections_cached_p)
+    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)),
+      max_connections_cached(max_connections_cached_p) {
 	if (client_p) {
 		StoreClient(std::move(client_p));
 	}
@@ -213,6 +214,8 @@ shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &co
 	}
 	// success! we got a connection id
 	auto connection_id = connection_request_response->ConnectionId();
+	// Cache at most one client per async send slot: pending SEND_DATA tasks can check out far more
+	// clients than ever POST concurrently, and each cached client pins a server connection slot.
 	idx_t pool_size = MaxValue<idx_t>(1, (idx_t)TaskScheduler::GetScheduler(context).NumberOfAsyncThreads());
 	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id), pool_size);
 }
@@ -236,7 +239,8 @@ unique_ptr<QuackClientWrapper> QuackClientConnection::GetClient(ClientContext &c
 void QuackClientConnection::StoreClient(unique_ptr<QuackClient> client_p) const {
 	lock_guard<mutex> guard(lock);
 	if (cached_clients.size() >= max_connections_cached) {
-		// already exceeded max cache size
+		// Beyond the cap, drop the client: destroying it closes its persistent socket, freeing the
+		// server-side connection slot instead of retaining an idle keep-alive the server must carry.
 		return;
 	}
 	// A pooled client has no owning query; drop the stamp so later teardown doesn't log under it.

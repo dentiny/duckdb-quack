@@ -98,8 +98,10 @@ private:
 	QuackUri uri;
 	string connection_id;
 	mutable mutex lock;
-	mutable vector<unique_ptr<QuackClient>> cached_clients;
+	//! Bounds cached_clients: each cached client holds a persistent socket that pins a server
+	//! connection slot, so an unbounded cache would let one attach starve the server's budget.
 	idx_t max_connections_cached;
+	mutable vector<unique_ptr<QuackClient>> cached_clients;
 };
 
 struct QuackClientWrapper {
@@ -130,6 +132,9 @@ private:
 
 private:
 	unique_ptr<HTTPParams> http_params;
+	//! Persistent keep-alive HTTP client: reused across requests so the TCP connection (and its
+	//! warm congestion window) survives between POSTs; replaced by the retry path on dead sockets.
+	unique_ptr<HTTPClient> http_client;
 };
 
 } // namespace duckdb
